@@ -1,0 +1,6 @@
+{
+  "name": "Plataforma de Estudo Ativo",
+  "description": "Plataforma inteligente de aprendizagem ativa e geração de flashcards e questões fiéis aos materiais fornecidos pelo usuário.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
