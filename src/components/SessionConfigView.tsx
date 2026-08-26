@@ -1,6 +1,7 @@
 import React from 'react';
 import { StudyMode, StudyDifficulty } from '../types.js';
 import { Settings, ShieldCheck, Sparkles, Plus, Minus, BookOpen, CheckCircle } from 'lucide-react';
+import { ProcessingProgress } from './ProcessingProgress.js';
 
 interface SessionConfigViewProps {
   mode: StudyMode;
@@ -16,6 +17,7 @@ interface SessionConfigViewProps {
   onGenerate: () => void;
   isGenerating: boolean;
   selectedTopicsCount: number;
+  generationProgress: { progress: number; label: string } | null;
 }
 
 export const SessionConfigView: React.FC<SessionConfigViewProps> = ({
@@ -32,6 +34,7 @@ export const SessionConfigView: React.FC<SessionConfigViewProps> = ({
   onGenerate,
   isGenerating,
   selectedTopicsCount,
+  generationProgress,
 }) => {
   const totalActivities = flashcardCount + multipleChoiceCount + trueFalseCount;
 
@@ -219,6 +222,10 @@ export const SessionConfigView: React.FC<SessionConfigViewProps> = ({
           </div>
         </div>
       </div>
+
+      {isGenerating && generationProgress && (
+        <ProcessingProgress progress={generationProgress.progress} label={generationProgress.label} />
+      )}
 
       <div className="pt-2 flex justify-end">
         <button

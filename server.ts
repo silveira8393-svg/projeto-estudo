@@ -4,7 +4,7 @@ import path from 'path';
 import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
 import { parsePdfBuffer, parseDocxBuffer, parsePlainText } from './server/parsers.js';
-import { AIRequestTimeoutError, extractStructureFromText, generateActivities } from './server/ai.js';
+import { extractStructureFromText, generateActivities, getAIErrorDiagnostics, mapAIErrorToHttp } from './server/ai.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -94,11 +94,12 @@ async function startServer() {
         ...result,
       });
     } catch (error: any) {
-      console.error('[Structure Error]:', error);
-      res.status(error instanceof AIRequestTimeoutError ? 504 : 500).json({
+      console.error('[Structure Error]:', getAIErrorDiagnostics(error));
+      const publicError = mapAIErrorToHttp(error);
+      res.status(publicError.status).json({
         success: false,
-        error: error?.message || 'Falha ao identificar estrutura do material com IA.',
-        ...(error instanceof AIRequestTimeoutError ? { code: error.code } : {}),
+        error: publicError.message,
+        code: publicError.code,
       });
     }
   });
@@ -140,11 +141,12 @@ async function startServer() {
         ...result,
       });
     } catch (error: any) {
-      console.error('[Generate Activities Error]:', error);
-      res.status(error instanceof AIRequestTimeoutError ? 504 : 500).json({
+      console.error('[Generate Activities Error]:', getAIErrorDiagnostics(error));
+      const publicError = mapAIErrorToHttp(error);
+      res.status(publicError.status).json({
         success: false,
-        error: error?.message || 'Falha ao gerar atividades com a IA.',
-        ...(error instanceof AIRequestTimeoutError ? { code: error.code } : {}),
+        error: publicError.message,
+        code: publicError.code,
       });
     }
   });

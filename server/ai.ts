@@ -48,6 +48,81 @@ function getErrorStatus(error: any): number | undefined {
   return Number.isInteger(status) ? status : undefined;
 }
 
+export interface AIHttpErrorResponse {
+  status: number;
+  code: 'AI_RATE_LIMIT' | 'AI_UNAVAILABLE' | 'AI_REQUEST_TIMEOUT' | 'AI_CONFIGURATION_ERROR' | 'AI_PROCESSING_ERROR';
+  message: string;
+}
+
+/**
+ * Converte erros tecnicos do SDK em respostas publicas estaveis.
+ * O erro original deve permanecer apenas no log do servidor.
+ */
+export function mapAIErrorToHttp(error: any): AIHttpErrorResponse {
+  if (error instanceof AIRequestTimeoutError || String(error?.code || '').toUpperCase() === 'AI_REQUEST_TIMEOUT') {
+    return {
+      status: 504,
+      code: 'AI_REQUEST_TIMEOUT',
+      message: 'O processamento demorou mais do que o esperado. Tente novamente.',
+    };
+  }
+
+  const providerStatus = getErrorStatus(error);
+  const technicalCode = String(error?.code || error?.status || '').toUpperCase();
+  const technicalMessage = String(error?.message || '').toUpperCase();
+  const technicalContext = `${technicalCode} ${technicalMessage}`;
+
+  if (providerStatus === 429 || technicalContext.includes('RESOURCE_EXHAUSTED')) {
+    return {
+      status: 429,
+      code: 'AI_RATE_LIMIT',
+      message: 'O limite temporário do serviço de IA foi atingido. Tente novamente mais tarde.',
+    };
+  }
+
+  if (providerStatus === 503 || technicalContext.includes('UNAVAILABLE')) {
+    return {
+      status: 503,
+      code: 'AI_UNAVAILABLE',
+      message: 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns instantes.',
+    };
+  }
+
+  if (providerStatus === 401 || providerStatus === 403 || technicalContext.includes('UNAUTHENTICATED') || technicalContext.includes('PERMISSION_DENIED')) {
+    return {
+      status: 500,
+      code: 'AI_CONFIGURATION_ERROR',
+      message: 'O serviço de IA não está configurado corretamente. Tente novamente mais tarde.',
+    };
+  }
+
+  return {
+    status: 500,
+    code: 'AI_PROCESSING_ERROR',
+    message: 'Não foi possível concluir o processamento com IA. Tente novamente.',
+  };
+}
+
+function redactSensitiveTechnicalText(value: unknown): string | undefined {
+  if (!value) return undefined;
+  let redacted = String(value);
+  const configuredApiKey = process.env.GEMINI_API_KEY;
+  if (configuredApiKey) redacted = redacted.split(configuredApiKey).join('[REDACTED]');
+  return redacted
+    .replace(/([?&](?:key|api_key)=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/("?(?:apiKey|api_key)"?\s*[:=]\s*["'])[^"']+/gi, '$1[REDACTED]');
+}
+
+export function getAIErrorDiagnostics(error: any) {
+  return {
+    name: String(error?.name || 'Error'),
+    status: getErrorStatus(error),
+    code: String(error?.code || error?.status || 'UNKNOWN'),
+    message: redactSensitiveTechnicalText(error?.message),
+    stack: redactSensitiveTechnicalText(error?.stack),
+  };
+}
+
 function isAttemptTimeout(error: any): boolean {
   if (error instanceof AIRequestTimeoutError) return true;
   if (getErrorStatus(error) !== undefined) return false;

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Header } from './components/Header.js';
 import { ProfileModal } from './components/ProfileModal.js';
 import { ProjectModal } from './components/ProjectModal.js';
-import { MaterialInput } from './components/MaterialInput.js';
+import { MaterialInput, ProcessingProgressUpdate } from './components/MaterialInput.js';
 import { TopicStructureView } from './components/TopicStructureView.js';
 import { SessionConfigView } from './components/SessionConfigView.js';
 import { FlashcardViewer } from './components/FlashcardViewer.js';
@@ -46,6 +46,7 @@ export default function App() {
   const [trueFalseCount, setTrueFalseCount] = useState<number>(2);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationProgress, setGenerationProgress] = useState<ProcessingProgressUpdate | null>(null);
 
   // Active Session & Generated Activities
   const [activityResult, setActivityResult] = useState<ActivityGenerationResult | null>(null);
@@ -89,10 +90,17 @@ export default function App() {
     rawText: string;
     wordCount: number;
     fileType: string;
-  }) => {
+  }, onProgress: (update: ProcessingProgressUpdate) => void) => {
     setIsStructuring(true);
     setGenerationError(null);
+    let gradualTimer: ReturnType<typeof setInterval> | undefined;
+    let structureProgress = 55;
     try {
+      onProgress({ progress: structureProgress, label: 'Estruturando tópicos com IA...' });
+      gradualTimer = setInterval(() => {
+        structureProgress = Math.min(structureProgress + 1, 84);
+        onProgress({ progress: structureProgress, label: 'Estruturando tópicos com IA...' });
+      }, 1000);
       const json = await safeFetchJson<{
         success: boolean;
         title: string;
@@ -111,6 +119,9 @@ export default function App() {
         throw new Error(json.error || 'Falha ao estruturar tópicos com IA.');
       }
 
+      if (gradualTimer) clearInterval(gradualTimer);
+      onProgress({ progress: 90, label: 'Validando e organizando tópicos...' });
+
       const processed: ProcessedMaterial = {
         id: `mat-${Date.now()}`,
         projectId: currentProject?.id || 'default',
@@ -121,6 +132,8 @@ export default function App() {
         extractedAt: new Date().toISOString(),
       };
 
+      onProgress({ progress: 100, label: 'Material concluído.' });
+      await new Promise((resolve) => setTimeout(resolve, 350));
       setCurrentMaterial(processed);
       // Select all topics by default
       setSelectedTopicIds(processed.topics.map((t) => t.id));
@@ -129,7 +142,9 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       setGenerationError(err?.message || 'Erro ao analisar a estrutura do material.');
+      throw err;
     } finally {
+      if (gradualTimer) clearInterval(gradualTimer);
       setIsStructuring(false);
     }
   };
@@ -159,6 +174,8 @@ export default function App() {
 
     setIsGenerating(true);
     setGenerationError(null);
+    setGenerationProgress({ progress: 10, label: 'Preparando configuração...' });
+    let gradualTimer: ReturnType<typeof setInterval> | undefined;
 
     try {
       const selectedTopics = currentMaterial.topics.filter((t) => selectedTopicIds.includes(t.id));
@@ -171,6 +188,13 @@ export default function App() {
       if (!combinedContent.trim() || combinedContent.length < 50) {
         combinedContent = currentMaterial.rawText;
       }
+
+      setGenerationProgress({ progress: 45, label: 'Preparando conteúdo selecionado...' });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      setGenerationProgress({ progress: 55, label: 'Gerando atividades com IA...' });
+      gradualTimer = setInterval(() => {
+        setGenerationProgress((current) => current ? { ...current, progress: Math.min(current.progress + 1, 84) } : current);
+      }, 1000);
 
       const data = await safeFetchJson<ActivityGenerationResult & { success: boolean; error?: string }>('/api/ai/generate', {
         method: 'POST',
@@ -191,12 +215,8 @@ export default function App() {
         throw new Error(data.error || 'Falha ao gerar atividades com a IA.');
       }
 
-      setActivityResult({
-        flashcards: data.flashcards || [],
-        multipleChoiceQuestions: data.multipleChoiceQuestions || [],
-        trueFalseQuestions: data.trueFalseQuestions || [],
-        warnings: data.warnings,
-      });
+      if (gradualTimer) clearInterval(gradualTimer);
+      setGenerationProgress({ progress: 90, label: 'Validando e organizando atividades...' });
 
       // Default active tab to flashcards if available, otherwise questions
       if ((data.flashcards || []).length > 0) {
@@ -207,10 +227,20 @@ export default function App() {
 
       setScore({ correct: 0, total: 0 });
       setIsSessionFinished(false);
+      setGenerationProgress({ progress: 100, label: 'Atividades concluídas.' });
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      setActivityResult({
+        flashcards: data.flashcards || [],
+        multipleChoiceQuestions: data.multipleChoiceQuestions || [],
+        trueFalseQuestions: data.trueFalseQuestions || [],
+        warnings: data.warnings,
+      });
     } catch (err: any) {
       console.error(err);
       setGenerationError(err?.message || 'Erro ao gerar atividades. Verifique o conteúdo e tente novamente.');
+      setGenerationProgress(null);
     } finally {
+      if (gradualTimer) clearInterval(gradualTimer);
       setIsGenerating(false);
     }
   };
@@ -344,6 +374,7 @@ export default function App() {
                       setTrueFalseCount={setTrueFalseCount}
                       onGenerate={handleGenerateActivities}
                       isGenerating={isGenerating}
+                      generationProgress={generationProgress}
                       selectedTopicsCount={selectedTopicIds.length}
                     />
                   </div>

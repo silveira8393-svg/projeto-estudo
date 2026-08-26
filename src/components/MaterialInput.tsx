@@ -1,9 +1,18 @@
 import React, { useState, useRef } from 'react';
 import { UploadCloud, FileText, Type, Sparkles, AlertCircle, CheckCircle2, Loader2, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 import { safeFetchJson, testHealthEndpoint, ApiDiagnostics } from '../lib/api.js';
+import { ProcessingProgress } from './ProcessingProgress.js';
+
+export interface ProcessingProgressUpdate {
+  progress: number;
+  label: string;
+}
 
 interface MaterialInputProps {
-  onProcessed: (data: { title: string; rawText: string; wordCount: number; fileType: string }) => void;
+  onProcessed: (
+    data: { title: string; rawText: string; wordCount: number; fileType: string },
+    onProgress: (update: ProcessingProgressUpdate) => void,
+  ) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -14,6 +23,7 @@ export const MaterialInput: React.FC<MaterialInputProps> = ({ onProcessed, isLoa
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState<ProcessingProgressUpdate | null>(null);
   const [lastDiagnostics, setLastDiagnostics] = useState<ApiDiagnostics | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isTestingHealth, setIsTestingHealth] = useState(false);
@@ -68,7 +78,14 @@ export const MaterialInput: React.FC<MaterialInputProps> = ({ onProcessed, isLoa
     }
 
     setIsExtracting(true);
+    setProcessingProgress({ progress: 10, label: activeTab === 'upload' ? 'Preparando upload...' : 'Preparando texto...' });
+    let gradualTimer: ReturnType<typeof setInterval> | undefined;
     try {
+      setProcessingProgress({ progress: 20, label: activeTab === 'upload' ? 'Enviando e extraindo conteúdo...' : 'Extraindo conteúdo...' });
+      gradualTimer = setInterval(() => {
+        setProcessingProgress((current) => current ? { ...current, progress: Math.min(current.progress + 1, 38) } : current);
+      }, 700);
+      let processedData: { title: string; rawText: string; wordCount: number; fileType: string };
       if (activeTab === 'upload' && selectedFile) {
         const formData = new FormData();
         formData.append('file', selectedFile);
@@ -90,12 +107,12 @@ export const MaterialInput: React.FC<MaterialInputProps> = ({ onProcessed, isLoa
           throw new Error(data.error || 'Falha ao extrair texto do documento.');
         }
 
-        onProcessed({
+        processedData = {
           title: data.title,
           rawText: data.text,
           wordCount: data.wordCount,
           fileType: data.fileType,
-        });
+        };
       } else {
         const data = await safeFetchJson<{
           success: boolean;
@@ -117,18 +134,25 @@ export const MaterialInput: React.FC<MaterialInputProps> = ({ onProcessed, isLoa
           throw new Error(data.error || 'Falha ao processar texto.');
         }
 
-        onProcessed({
+        processedData = {
           title: data.title,
           rawText: data.text,
           wordCount: data.wordCount,
           fileType: 'text_paste',
-        });
+        };
       }
+      if (gradualTimer) clearInterval(gradualTimer);
+      setProcessingProgress({ progress: 40, label: 'Extração concluída.' });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      setProcessingProgress({ progress: 50, label: 'Preparando conteúdo para análise...' });
+      await onProcessed(processedData, setProcessingProgress);
     } catch (err: any) {
       console.error('[MaterialInput Extraction Catch]:', err);
       setErrorMsg(err?.message || 'Erro ao processar o material. Tente novamente.');
       setShowDiagnostics(true);
+      setProcessingProgress(null);
     } finally {
+      if (gradualTimer) clearInterval(gradualTimer);
       setIsExtracting(false);
     }
   };
@@ -346,6 +370,10 @@ export const MaterialInput: React.FC<MaterialInputProps> = ({ onProcessed, isLoa
               )}
             </div>
           </div>
+        )}
+
+        {(isExtracting || isLoading) && processingProgress && (
+          <ProcessingProgress progress={processingProgress.progress} label={processingProgress.label} />
         )}
 
         <div className="flex items-center justify-between pt-2">
