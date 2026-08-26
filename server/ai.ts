@@ -5,9 +5,24 @@ import { MaterialTopic, Flashcard, MultipleChoiceQuestion, TrueFalseQuestion, Ac
 // Centralized AI configuration with dynamic defaults (no hardcoded quota/RPM assumptions)
 export const AI_CONFIG = {
   getModel: () => process.env.AI_MODEL || 'gemini-3.7-flash',
-  maxRetries: 3,
-  initialBackoffMs: 1200,
+  getRequestTimeoutMs: () => readPositiveInteger(process.env.AI_REQUEST_TIMEOUT_MS, 60_000),
+  getMaxAttempts: () => readPositiveInteger(process.env.AI_MAX_ATTEMPTS, 3),
+  getInitialBackoffMs: () => readPositiveInteger(process.env.AI_RETRY_INITIAL_BACKOFF_MS, 1_200),
 };
+
+function readPositiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export class AIRequestTimeoutError extends Error {
+  readonly code = 'AI_REQUEST_TIMEOUT';
+
+  constructor(timeoutMs: number) {
+    super(`A IA demorou mais de ${Math.ceil(timeoutMs / 1000)} segundos para responder. Tente novamente.`);
+    this.name = 'AIRequestTimeoutError';
+  }
+}
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -24,20 +39,85 @@ function getAiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Resilient wrapper with exponential backoff for rate limits (429) and transient errors
-async function executeWithRetry<T>(operation: () => Promise<T>, attempts = AI_CONFIG.maxRetries): Promise<T> {
+const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+const TEMPORARY_NETWORK_ERROR_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ENETDOWN', 'ENETUNREACH']);
+
+function getErrorStatus(error: any): number | undefined {
+  const rawStatus = error?.status ?? error?.statusCode ?? error?.response?.status;
+  const status = Number(rawStatus);
+  return Number.isInteger(status) ? status : undefined;
+}
+
+function isAttemptTimeout(error: any): boolean {
+  if (error instanceof AIRequestTimeoutError) return true;
+  if (getErrorStatus(error) !== undefined) return false;
+  const name = String(error?.name || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  return name.includes('timeout') || code === 'ETIMEDOUT' || message.includes('timed out') || message.includes('timeout');
+}
+
+function isRetryableError(error: any): boolean {
+  if (isAttemptTimeout(error)) return false;
+
+  const status = getErrorStatus(error);
+  if (status !== undefined) return RETRYABLE_HTTP_STATUSES.has(status);
+
+  const code = String(error?.code || error?.cause?.code || '').toUpperCase();
+  if (TEMPORARY_NETWORK_ERROR_CODES.has(code)) return true;
+
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('fetch failed') ||
+    message.includes('network error') ||
+    message.includes('socket hang up') ||
+    message.includes('connection reset') ||
+    message.includes('temporary failure')
+  );
+}
+
+async function executeAttemptWithTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController();
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      controller.abort();
+      reject(new AIRequestTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([operation(controller.signal), timeoutPromise]);
+  } catch (error: any) {
+    if (controller.signal.aborted && !(error instanceof AIRequestTimeoutError)) {
+      throw new AIRequestTimeoutError(timeoutMs);
+    }
+    throw error;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+}
+
+// Retries only explicit transient HTTP statuses and temporary network failures.
+export async function executeWithRetry<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  attempts = AI_CONFIG.getMaxAttempts(),
+): Promise<T> {
+  const maxAttempts = Math.max(1, attempts);
+  const timeoutMs = AI_CONFIG.getRequestTimeoutMs();
   let lastError: any = null;
-  for (let i = 0; i < attempts; i++) {
+  for (let i = 0; i < maxAttempts; i++) {
     try {
-      return await operation();
+      return await executeAttemptWithTimeout(operation, timeoutMs);
     } catch (error: any) {
       lastError = error;
-      const isRateLimit = error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota') || error?.message?.includes('RESOURCE_EXHAUSTED');
-      const isTransient = (typeof error?.status === 'number' && error.status >= 500) || error?.message?.includes('fetch failed') || error?.message?.includes('503') || error?.message?.includes('UNAVAILABLE') || error?.message?.includes('high demand');
-
-      if ((isRateLimit || isTransient) && i < attempts - 1) {
-        const delay = AI_CONFIG.initialBackoffMs * Math.pow(2, i) + Math.random() * 400;
-        console.warn(`[AI Engine] Erro transitório ou limite atingido (${error?.message}). Tentativa ${i + 1}/${attempts} em ${Math.round(delay)}ms...`);
+      if (isRetryableError(error) && i < maxAttempts - 1) {
+        const delay = AI_CONFIG.getInitialBackoffMs() * Math.pow(2, i) + Math.random() * 400;
+        console.warn(`[AI Engine] Erro transitório. Nova tentativa ${i + 2}/${maxAttempts} em ${Math.round(delay)}ms.`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
@@ -73,11 +153,13 @@ Regras:
    - excerptContent: um trecho literal ou síntese direta do conteúdo correspondente a esse tópico (para ser usado como base de estudo posterior)
 4. Mantenha os nomes e conceitos originais usados pelo autor.`;
 
-  return await executeWithRetry(async () => {
+  return await executeWithRetry(async (abortSignal) => {
     const response = await ai.models.generateContent({
       model,
       contents: `Título do Material: "${materialTitle}"\n\nTexto do Material:\n${textSample}`,
       config: {
+        abortSignal,
+        httpOptions: { timeout: AI_CONFIG.getRequestTimeoutMs() },
         systemInstruction,
         temperature: 0.2, // Baixa temperatura para fidelidade
         responseMimeType: 'application/json',
@@ -202,11 +284,13 @@ QUANTIDADES SOLICITADAS:
 
 Gere exatamente as quantidades solicitadas acima em conformidade com o schema JSON.`;
 
-  return await executeWithRetry(async () => {
+  return await executeWithRetry(async (abortSignal) => {
     const response = await ai.models.generateContent({
       model,
       contents: promptContent,
       config: {
+        abortSignal,
+        httpOptions: { timeout: AI_CONFIG.getRequestTimeoutMs() },
         systemInstruction,
         temperature: isFaithful ? 0.15 : 0.35,
         responseMimeType: 'application/json',

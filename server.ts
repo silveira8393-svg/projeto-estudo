@@ -4,7 +4,7 @@ import path from 'path';
 import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
 import { parsePdfBuffer, parseDocxBuffer, parsePlainText } from './server/parsers.js';
-import { extractStructureFromText, generateActivities } from './server/ai.js';
+import { AIRequestTimeoutError, extractStructureFromText, generateActivities } from './server/ai.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -95,9 +95,10 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error('[Structure Error]:', error);
-      res.status(500).json({
+      res.status(error instanceof AIRequestTimeoutError ? 504 : 500).json({
         success: false,
         error: error?.message || 'Falha ao identificar estrutura do material com IA.',
+        ...(error instanceof AIRequestTimeoutError ? { code: error.code } : {}),
       });
     }
   });
@@ -140,9 +141,10 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error('[Generate Activities Error]:', error);
-      res.status(500).json({
+      res.status(error instanceof AIRequestTimeoutError ? 504 : 500).json({
         success: false,
         error: error?.message || 'Falha ao gerar atividades com a IA.',
+        ...(error instanceof AIRequestTimeoutError ? { code: error.code } : {}),
       });
     }
   });
