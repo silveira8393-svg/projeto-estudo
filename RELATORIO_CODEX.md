@@ -1411,3 +1411,157 @@ Os arquivos de teste foram construidos em memoria e nao foram adicionados ao rep
 ### Proximos passos recomendados
 
 - Usar o resultado da reproducao unica para confirmar a correcao, sem promover para Production nesta tarefa.
+
+## Resultado do worker PDF no Preview (04/09/2026)
+
+### Resumo
+
+- A inclusao do worker foi consolidada em `6561b34` (`fix: incluir worker PDF no bundle da Vercel`).
+- A forma inicial de `includeFiles` foi rejeitada pela validacao da Vercel; o glob foi corrigido em `d45aaa3` (`fix: corrigir glob do worker PDF na Vercel`) sem reescrever o historico.
+- O Preview valido foi criado automaticamente em `https://projeto-estudo-31zbqplgx-silveira8393-svgs-projects.vercel.app`, deployment `dpl_39ByoCe43TYc5cNZU3omo959cxdA`, target `preview`, status `Ready`.
+
+### Arquivos alterados
+
+- `vercel.json`: worker do `pdfjs-dist` incluido no mesmo glob dos arquivos nativos de canvas.
+- `RELATORIO_CODEX.md`: registro da implementacao e do resultado final.
+
+### Alteracoes realizadas
+
+- O bundle da Function passou a conter explicitamente `pdfjs-dist/legacy/build/pdf.worker.mjs`.
+- A instrumentacao diagnostica foi mantida e nenhum codigo do parser, dependencia, fallback, arquitetura ou resposta publica foi alterado.
+
+### Testes executados
+
+- `npm run lint`, `npm run build` e `git diff --check`: passaram antes dos commits.
+- Teste local com o arquivo exato: passou, 86 paginas e 221.549 caracteres, sem imprimir conteudo.
+- Upload unico de `DEL1001.pdf` no Preview valido: concluido sem registrar o texto ou salvar a resposta.
+- Runtime Logs consultados imediatamente depois da reproducao.
+
+### Resultados
+
+- A extracao remota retornou HTTP 200: 86 paginas, 36.756 palavras e 221.547 caracteres.
+- O Runtime Log confirmou `POST /api/materials/extract`, HTTP 200, ambiente `preview`, branch `piloto-vercel` e cache `MISS`.
+- Nao houve categoria de erro, mensagem do parser, `DOMMatrix`, erro de canvas ou resolucao de modulo.
+- O sucesso apos a inclusao isolada confirma que o worker dinamico ausente do bundle era a causa da falha serverless.
+
+### Problemas encontrados
+
+- O deployment de `6561b34` falhou antes do build porque `includeFiles` foi expresso como lista, formato nao aceito nessa configuracao. O ajuste para um unico glob fechado gerou o Preview valido.
+- Nenhum problema funcional foi encontrado no teste real do PDF apos o ajuste.
+
+### Estado atual
+
+- `piloto-vercel` e `origin/piloto-vercel` contem `d45aaa3`.
+- O Preview automatico esta `Ready` e o PDF real foi validado com sucesso.
+- `main`, Production e dependencias permaneceram intactas.
+- Este resultado final permanece como alteracao local do relatorio para evitar outro Preview automatico nesta tarefa.
+
+### Pendencias
+
+- Consolidar este registro documental em tarefa posterior, considerando que outro push pode acionar novo Preview.
+- Avaliar em tarefa separada a remocao ou reducao da instrumentacao diagnostica temporaria, agora que a causa foi confirmada.
+
+### Proximos passos recomendados
+
+- Em tarefa separada, consolidar o registro final e remover ou reduzir a instrumentacao temporaria, mantendo o Preview antes de qualquer decisao sobre Production.
+
+## Promocao controlada para Production (04/09/2026)
+
+### Resumo
+
+- O Preview validado `dpl_39ByoCe43TYc5cNZU3omo959cxdA`, associado ao commit `d45aaa3`, foi promovido pela operacao suportada `vercel promote`.
+- A Vercel criou a copia de Production `dpl_CTQvK1GzKZwHWv7MvDRkvagswm8A`, status `Ready`, preservando o codigo e a configuracao do deployment validado.
+- O endereco estavel `https://projeto-estudo-sooty.vercel.app` passou a apontar para a versao corrigida.
+
+### Arquivos alterados
+
+- `RELATORIO_CODEX.md`: registro da promocao e validacao de Production; nenhum codigo ou configuracao foi alterado localmente.
+
+### Alteracoes realizadas
+
+- Promocao direta do deployment validado, sem merge, push, novo commit ou alteracao de dependencias.
+- Os aliases de Production foram associados ao novo deployment pela Vercel.
+- A instrumentacao diagnostica existente foi preservada.
+
+### Testes executados
+
+- Confirmacao previa de status `Ready`, commit, aliases, configuracao do projeto e existencia das variaveis de Production somente por nome.
+- `GET /`, asset JavaScript principal, fallback SPA e `GET /api/health` no dominio estavel.
+- Upload unico de `DEL1001.pdf` em Production, sem exibir ou salvar seu conteudo.
+- Estruturacao de texto minimo e geracao de um unico flashcard.
+- Consulta dos Runtime Logs e dos metadados finais do deployment e aliases.
+
+### Resultados
+
+- Pagina, asset principal, fallback SPA e health retornaram HTTP 200 com os tipos de conteudo esperados.
+- `DEL1001.pdf` retornou HTTP 200 em aproximadamente 5,05 segundos: 86 paginas, 36.756 palavras e 221.547 caracteres.
+- Estruturacao minima retornou HTTP 200 com dois topicos; geracao minima retornou HTTP 200 com um flashcard.
+- Os Runtime Logs confirmaram HTTP 200 para health, extracao, estrutura e geracao no ambiente `production`, branch `piloto-vercel`.
+- Nao houve `FUNCTION_INVOCATION_FAILED`, `MODULE_RESOLUTION`, erro de worker, `DOMMatrix`, erro de canvas ou HTTP 500 inesperado.
+
+### Problemas encontrados
+
+- A primeira tentativa local de verificar as rotas usou acidentalmente um nome reservado do PowerShell e foi interrompida antes dos testes; a verificacao foi repetida com nome seguro e passou. Nenhum estado remoto foi afetado.
+- Nenhum problema funcional foi encontrado na Production promovida.
+
+### Estado atual
+
+- Production Current: `dpl_CTQvK1GzKZwHWv7MvDRkvagswm8A`, derivada do deployment validado e associada pelo filtro Git ao commit `d45aaa3`.
+- Dominios associados: `projeto-estudo-sooty.vercel.app`, `projeto-estudo-silveira8393-svgs-projects.vercel.app` e `projeto-estudo-git-piloto-vercel-silveira8393-svgs-projects.vercel.app`.
+- `piloto-vercel` e `origin/piloto-vercel` permanecem em `d45aaa3`; `main` permanece em `3435fd5`.
+- Somente este registro permanece modificado localmente.
+
+### Pendencias
+
+- Consolidar o historico documental em tarefa posterior.
+- Avaliar separadamente a reducao da instrumentacao temporaria, sem alterar a versao funcional validada.
+
+### Proximos passos recomendados
+
+- Em tarefa separada, consolidar o relatorio e planejar a remocao controlada da instrumentacao diagnostica, com nova validacao antes de qualquer outra mudanca em Production.
+
+## Limpeza da instrumentacao temporaria do parser PDF (04/09/2026)
+
+### Resumo
+
+- O classificador temporario usado para identificar a falha de resolucao de modulo foi removido apos a confirmacao e correcao da causa.
+- Foi preservado um log operacional minimo e sanitizado com somente a etapa fixa do parser.
+- Os registros locais pendentes das validacoes de Preview e Production foram mantidos e serao consolidados neste mesmo commit.
+
+### Arquivos alterados
+
+- `server/parsers.ts`: remocao do classificador temporario e reducao do log de erro.
+- `RELATORIO_CODEX.md`: consolidacao do historico pendente e registro desta estabilizacao.
+
+### Alteracoes realizadas
+
+- Removidos o tipo `PdfErrorCategory`, a lista fechada de padroes e a leitura interna de `error.message`.
+- Mantido o log `[PDF Parser Error]` somente com `stage=PDFParse.getText`.
+- Mantidas a resposta publica generica, a biblioteca atual e a inclusao do worker PDF no `vercel.json`.
+- Nenhuma UX, dependencia, arquitetura, persistencia ou funcionalidade foi alterada.
+
+### Testes executados
+
+- `npm run lint`, `npm run build` e `git diff --check`: passaram.
+- Teste local com o arquivo exato: passou, com 86 paginas, 36.756 palavras e 221.547 caracteres, sem imprimir conteudo.
+- Pendentes nesta entrada: commit, Preview automatico, health, upload remoto unico e Runtime Logs.
+
+### Resultados
+
+- A limpeza nao alterou o caminho de sucesso nem o contrato publico do parser na validacao local.
+
+### Problemas encontrados
+
+- Nenhum problema adicional identificado antes da validacao.
+
+### Estado atual
+
+- Limpeza preparada somente em `piloto-vercel`; `main` e Production permanecem inalteradas nesta tarefa.
+
+### Pendencias
+
+- Validar localmente, consolidar, enviar a branch e verificar o PDF real uma unica vez no Preview.
+
+### Proximos passos recomendados
+
+- Concluir a validacao desta limpeza antes de considerar o marco estabilizado e iniciar qualquer fase de persistencia.

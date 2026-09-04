@@ -7,38 +7,6 @@ export interface ExtractedDocument {
   wordCount: number;
 }
 
-type PdfErrorCategory =
-  | 'WORKER'
-  | 'CANVAS_NATIVE'
-  | 'FONT'
-  | 'IMAGE'
-  | 'XREF'
-  | 'ENCRYPTION'
-  | 'INVALID_PDF'
-  | 'FILESYSTEM'
-  | 'WASM'
-  | 'MEMORY'
-  | 'MODULE_RESOLUTION'
-  | 'UNKNOWN';
-
-function classifyPdfError(error: unknown): PdfErrorCategory {
-  const message = String((error as { message?: unknown })?.message || '').toLowerCase();
-  const matches = (...patterns: string[]) => patterns.some((pattern) => message.includes(pattern));
-
-  if (matches('cannot find module', 'module not found', 'err_module_not_found', 'cannot find package')) return 'MODULE_RESOLUTION';
-  if (matches('worker', 'workersrc')) return 'WORKER';
-  if (matches('canvas', 'dommatrix', 'imagedata', 'path2d')) return 'CANVAS_NATIVE';
-  if (matches('font', 'fontface', 'standardfontdata')) return 'FONT';
-  if (matches('image', 'jpeg', 'jpx', 'png', 'bitmap')) return 'IMAGE';
-  if (matches('xref', 'cross-reference')) return 'XREF';
-  if (matches('password', 'encrypt')) return 'ENCRYPTION';
-  if (matches('invalidpdf', 'invalid pdf', 'pdf structure', 'formaterror', 'invalid document')) return 'INVALID_PDF';
-  if (matches('enoent', 'eacces', 'filesystem', 'readfile', 'no such file')) return 'FILESYSTEM';
-  if (matches('wasm', 'webassembly')) return 'WASM';
-  if (matches('out of memory', 'enomem', 'allocation failed', 'heap')) return 'MEMORY';
-  return 'UNKNOWN';
-}
-
 export async function parsePdfBuffer(buffer: Buffer): Promise<ExtractedDocument> {
   try {
     const parser = new PDFParse({ data: buffer });
@@ -60,11 +28,8 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ExtractedDocument>
       pageCount: result?.total || result?.pages?.length || undefined,
       wordCount,
     };
-  } catch (error) {
-    console.error('[PDF Parser Error Category]:', {
-      stage: 'PDFParse.getText',
-      pdfErrorCategory: classifyPdfError(error),
-    });
+  } catch {
+    console.error('[PDF Parser Error]:', { stage: 'PDFParse.getText' });
     throw new Error('Falha ao ler o arquivo PDF. O documento pode estar invalido ou protegido.');
   }
 }
