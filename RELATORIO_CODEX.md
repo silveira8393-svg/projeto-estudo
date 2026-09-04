@@ -1398,6 +1398,7 @@ Os arquivos de teste foram construidos em memoria e nao foram adicionados ao rep
 ### Problemas encontrados
 
 - A categoria sanitizada nao revela o nome do modulo ausente; a hipotese do worker sera confirmada ou refutada pelo teste real no novo Preview.
+- A primeira forma usou uma lista em `includeFiles`, mas a Vercel aceita um unico padrao glob nessa configuracao e rejeitou o deployment antes do build. A mesma inclusao foi ajustada para um glob fechado com os dois alvos, sem mudanca funcional.
 
 ### Estado atual
 
