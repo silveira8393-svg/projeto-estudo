@@ -1311,3 +1311,102 @@ Os arquivos de teste foram construidos em memoria e nao foram adicionados ao rep
 ### Proximos passos recomendados
 
 - Usar a categoria resultante apenas para diagnosticar a proxima correcao; nao implementar correcao funcional nesta tarefa.
+
+## Resultado do classificador no Preview (04/09/2026)
+
+### Resumo
+
+- O classificador fechado foi consolidado no commit `711cc05` (`chore: classificar erros do parser PDF`) e enviado somente para `piloto-vercel`.
+- A integracao Git criou o Preview `https://projeto-estudo-85yv1gnc7-silveira8393-svgs-projects.vercel.app`, deployment `dpl_BpqCq8w7HvPjH6xNmwSRBwShX17M`, target `preview`, confirmado como `Ready`.
+- `DEL1001.pdf` foi enviado uma unica vez; a resposta foi descartada e a mensagem original nunca foi registrada.
+
+### Arquivos alterados
+
+- `server/parsers.ts`: classificador fechado incluido no commit.
+- `RELATORIO_CODEX.md`: levantamento incluido no commit e resultado final mantido localmente.
+
+### Alteracoes realizadas
+
+- A mensagem original passou somente por comparacao interna e foi descartada.
+- O Runtime Log recebeu exclusivamente a etapa fixa e uma categoria da lista fechada.
+- Nenhuma correcao funcional, dependencia, biblioteca, fallback ou arquitetura foi alterada.
+
+### Testes executados
+
+- `npm run lint`, `npm run build` e `git diff --check`: passaram.
+- Teste local com o arquivo exato: passou, 86 paginas, 221.549 caracteres e aproximadamente 1,72 segundo, sem imprimir conteudo.
+- Upload unico no Preview: 2.074.631 bytes multipart, HTTP 500 JSON em aproximadamente 3,90 segundos; corpo descartado.
+- Runtime Log consultado imediatamente apos a unica reproducao.
+
+### Resultados
+
+- Categoria emitida: `MODULE_RESOLUTION`, na etapa `PDFParse.getText`.
+- A classificacao e sustentada exclusivamente por um dos padroes fechados de falha de resolucao de modulo ou pacote; nenhum texto original foi persistido ou exibido.
+- A inspecao estatica encontrou carregamentos dinamicos dos binarios de plataforma de `@napi-rs/canvas` e do modulo `pdf.worker.mjs`.
+- Como o cold start, `DOMMatrix` e canvas ja funcionam, enquanto a falha ocorre ao executar `getText()`, o worker dinamico ausente do rastreamento do bundle e o candidato principal. A categoria nao identifica o nome do modulo; portanto esta e uma conclusao provavel, nao uma comprovacao final do caminho ausente.
+
+### Problemas encontrados
+
+- A prioridade intencional de `MODULE_RESOLUTION` evita expor o nome original, mas nao distingue canvas nativo de worker quando a mensagem contem ambos os conceitos.
+- O PDF continua passando localmente e falhando somente no runtime serverless.
+
+### Estado atual
+
+- `piloto-vercel` e `origin/piloto-vercel` contem `711cc05`.
+- O Preview do classificador esta `Ready`; a reproducao unica foi concluida e nao repetida.
+- `main`, Production e dependencias permaneceram intactas.
+- Este resultado final permanece como alteracao local do relatorio para evitar outro Preview nesta tarefa.
+
+### Pendencias
+
+- Avaliar em tarefa separada o empacotamento explicito de `pdfjs-dist/legacy/build/pdf.worker.mjs` ou a configuracao suportada de worker do `pdf-parse`, sem trocar biblioteca.
+- Confirmar a solucao com testes locais e uma unica reproducao em novo Preview antes de remover ou reduzir a instrumentacao.
+
+### Proximos passos recomendados
+
+- Implementar e validar, em tarefa separada, a menor correcao de empacotamento/configuracao do worker PDF; nao promover para Production antes de o mesmo arquivo retornar sucesso no Preview.
+
+## Inclusao do worker PDF no bundle da Vercel (04/09/2026)
+
+### Resumo
+
+- A investigacao confirmou que o `pdfjs-dist` resolve dinamicamente `pdf.worker.mjs` no runtime Node e que esse arquivo nao estava declarado entre os arquivos adicionais da Function.
+- Foi preparada a menor correcao de empacotamento, mantendo as bibliotecas, o fluxo da API e a instrumentacao diagnostica atuais.
+
+### Arquivos alterados
+
+- `vercel.json`: inclusao explicita do worker do `pdfjs-dist` no bundle serverless.
+- `RELATORIO_CODEX.md`: registro da investigacao, implementacao e validacao desta tarefa.
+
+### Alteracoes realizadas
+
+- `includeFiles` passou a incluir `node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs`, alem dos binarios ja incluidos de `@napi-rs/canvas`.
+- Nenhuma dependencia, biblioteca, fallback, arquitetura ou resposta publica foi alterada.
+
+### Testes executados
+
+- `npm run lint`, `npm run build` e `git diff --check`: passaram.
+- Teste local com o arquivo exato: passou em aproximadamente 2,1 segundos, com 86 paginas e 221.549 caracteres, sem imprimir conteudo.
+- Pendentes nesta entrada: commit, Preview automatico e reproducao remota unica.
+
+### Resultados
+
+- O `pdf-parse` 2.4.5 usa `pdfjs-dist` 5.4.296 e oferece configuracao explicita de worker, mas o caminho padrao do Node resolve `./pdf.worker.mjs` ao lado do modulo principal.
+- A inclusao no bundle e menos invasiva que alterar o codigo do parser e atende diretamente ao carregamento dinamico associado a categoria `MODULE_RESOLUTION`.
+- O teste manual com aproximadamente 35.485 palavras confirmou que estrutura, geracao e estudo funcionam no Preview quando a etapa PDF e eliminada, isolando a falha ao parsing.
+
+### Problemas encontrados
+
+- A categoria sanitizada nao revela o nome do modulo ausente; a hipotese do worker sera confirmada ou refutada pelo teste real no novo Preview.
+
+### Estado atual
+
+- Correcao de empacotamento preparada somente em `piloto-vercel`; `main` e Production permanecem intactas.
+
+### Pendencias
+
+- Validar localmente, consolidar, enviar a branch e testar o arquivo exato uma unica vez no Preview automatico.
+
+### Proximos passos recomendados
+
+- Usar o resultado da reproducao unica para confirmar a correcao, sem promover para Production nesta tarefa.
