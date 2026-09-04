@@ -1211,3 +1211,103 @@ Os arquivos de teste foram construidos em memoria e nao foram adicionados ao rep
 ### Proximos passos recomendados
 
 - Capturar a excecao sanitizada no Preview e, sem implementar correcao funcional, definir a causa e a proxima alteracao minima.
+
+## Resultado da instrumentacao no Preview (04/09/2026)
+
+### Resumo
+
+- A instrumentacao sanitizada foi consolidada no commit `5ea0088` (`chore: instrumentar erros do parser PDF`) e enviada somente para `piloto-vercel`.
+- A integracao Git criou o Preview `https://projeto-estudo-en2no1702-silveira8393-svgs-projects.vercel.app`, deployment `dpl_7vAiCjCjS21dKwiatWWtgYi6U5BW`, target `preview`, confirmado como `Ready`.
+- O arquivo `DEL1001.pdf` foi enviado uma unica vez a esse Preview; o corpo da resposta foi descartado e nenhum conteudo foi registrado.
+
+### Arquivos alterados
+
+- `server/parsers.ts`: instrumentacao sanitizada incluida no commit.
+- `RELATORIO_CODEX.md`: historico de diagnostico incluido no commit e este resultado final mantido localmente.
+
+### Alteracoes realizadas
+
+- O `catch` do parser passou a registrar somente etapa, `name`, `code`, `causeName` e `causeCode`.
+- A resposta publica permaneceu generica e nenhuma mensagem, stack, buffer, texto, pagina, caminho ou segredo foi registrado.
+- Nenhuma correcao funcional, dependencia, fallback ou alteracao arquitetural foi implementada.
+
+### Testes executados
+
+- `npm run lint`: passou.
+- `npm run build`: passou.
+- `git diff --check`: passou.
+- `PDFParse.getText()` local com o arquivo exato: passou novamente, 86 paginas e 221.549 caracteres, sem imprimir conteudo.
+- Upload unico no Preview instrumentado: 2.074.631 bytes multipart, HTTP 500 JSON em aproximadamente 4,50 segundos; resposta com 93 bytes descartada.
+- Runtime Logs do deployment consultados imediatamente apos a reproducao.
+
+### Resultados
+
+- Excecao sanitizada: etapa `PDFParse.getText`, `name=Error`, sem `code`, sem `causeName` e sem `causeCode`.
+- O log global confirmou `Error`, codigo normalizado `UNKNOWN` e HTTP 500.
+- O erro foi reproduzido somente no runtime serverless; o mesmo arquivo continua sendo processado localmente.
+- Nao houve 413, 504, process exit, `DOMMatrix` ou modulo canvas ausente.
+
+### Problemas encontrados
+
+- Os campos estruturados permitidos sao insuficientes para determinar a causa interna: a biblioteca lancou um `Error` generico sem codigo nem causa.
+- A mensagem bruta nao foi registrada porque nao ha garantia de que ela nao contenha caminho ou fragmento derivado do documento.
+- Portanto, a causa exata ainda nao foi identificada. A hipotese permanece restrita a diferenca do runtime Linux serverless ou recurso carregado durante `getText()`, sem evidencia para escolher entre worker, fonte, canvas, imagem ou outro componente.
+
+### Estado atual
+
+- `piloto-vercel` e `origin/piloto-vercel` contem `5ea0088`.
+- O Preview instrumentado esta `Ready`; o erro do PDF foi reproduzido uma vez e nao foi repetido.
+- `main`, Production e dependencias permaneceram intactas.
+- Este resultado final permanece como alteracao local do relatorio para nao disparar outro Preview nesta tarefa.
+
+### Pendencias
+
+- Em tarefa posterior, substituir temporariamente a omissao total da mensagem por classificacao local baseada em uma lista fechada de padroes tecnicos seguros, retornando somente uma categoria predefinida.
+- Somente depois dessa revisao, autorizar uma nova reproducao unica para distinguir o componente interno sem expor dados.
+
+### Proximos passos recomendados
+
+- Revisar e autorizar uma instrumentacao de segunda etapa que converta a mensagem internamente em categorias predefinidas como worker, modulo nativo, canvas, fonte, XRef, criptografia, memoria ou desconhecida, sem registrar a mensagem original.
+
+## Classificador fechado de erros PDF (04/09/2026)
+
+### Resumo
+
+- Preparada a segunda instrumentacao diagnostica para classificar internamente a mensagem original e registrar somente uma categoria tecnica predefinida.
+
+### Arquivos alterados
+
+- `server/parsers.ts`: classificador fechado e log reduzido a etapa/categoria.
+- `RELATORIO_CODEX.md`: levantamento e registro da tarefa.
+
+### Alteracoes realizadas
+
+- Versoes confirmadas: `pdf-parse` 2.4.5, `pdfjs-dist` 5.4.296 e `@napi-rs/canvas` 0.1.80.
+- O codigo instalado sustenta familias de erro relacionadas a worker, resolucao de modulo, canvas nativo, fontes, imagens, XRef/estrutura, criptografia, PDF invalido, filesystem, WebAssembly e memoria.
+- Categorias fechadas: `WORKER`, `MODULE_RESOLUTION`, `CANVAS_NATIVE`, `FONT`, `IMAGE`, `XREF`, `ENCRYPTION`, `INVALID_PDF`, `FILESYSTEM`, `WASM`, `MEMORY` e `UNKNOWN`.
+- A mensagem e lida somente dentro do classificador, comparada com termos tecnicos e descartada. O log contem apenas `stage=PDFParse.getText` e `pdfErrorCategory`.
+- A resposta publica generica permanece inalterada; nenhuma dependencia, biblioteca, arquitetura, fallback ou correcao funcional foi modificada.
+
+### Testes executados
+
+- Pendentes nesta entrada: TypeScript, build, `git diff --check`, teste local, commit, Preview automatico e uma unica reproducao remota.
+
+### Resultados
+
+- A ordem do classificador prioriza resolucao de modulo antes de canvas e canvas antes de imagem para reduzir ambiguidades.
+
+### Problemas encontrados
+
+- Nenhum problema adicional identificado antes da validacao.
+
+### Estado atual
+
+- Instrumentacao de segunda etapa preparada somente na branch `piloto-vercel`.
+
+### Pendencias
+
+- Validar, consolidar, enviar a branch e capturar uma unica categoria no Preview.
+
+### Proximos passos recomendados
+
+- Usar a categoria resultante apenas para diagnosticar a proxima correcao; nao implementar correcao funcional nesta tarefa.
