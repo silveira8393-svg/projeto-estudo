@@ -519,3 +519,445 @@ Validacao manual realizada pelo usuario no navegador com material real:
 
 1. Considerar o Marco 1 concluido funcionalmente.
 2. Nao iniciar outro marco ou funcionalidade sem nova tarefa explicitamente autorizada.
+
+---
+
+## Auditoria de preparacao do piloto na Vercel (31/08/2026)
+
+### Resumo
+
+- A aplicacao pode ser publicada na Vercel para um piloto temporario, mas nao exatamente na forma atual: o frontend Vite e compativel, enquanto o backend precisa ser exposto como Vercel Function em vez de iniciar um processo persistente com `app.listen`.
+- O Express pode ser reaproveitado como uma unica Function Node.js. A Vercel documenta suporte a Express, mas ignora `express.static()` nesse modelo; o frontend compilado deve ser servido pela camada estatica da plataforma.
+- O bloqueio tecnico principal e o upload atual de 30 MB. Vercel Functions limitam request e response a 4,5 MB, limite nao configuravel. O fluxo atual ainda devolve todo o texto extraido ao navegador e depois o envia novamente em JSON, criando dois outros pontos sujeitos ao mesmo teto.
+- E possivel realizar o piloto sem banco, storage persistente, historico ou autenticacao. Isso nao significa que os dados nao transitem nem que haja retencao zero nos provedores: arquivo/texto passa pela infraestrutura da Vercel e partes do material, prompts e respostas passam pela Gemini.
+- Antes de expor uma URL sem autenticacao, sao obrigatorios limites coerentes com a plataforma, validacao efetiva de entrada, protecao contra abuso/custo, alinhamento de timeouts e sanitizacao adicional dos logs/erros de extracao.
+- Nenhum codigo, configuracao, branch, servico ou variavel foi alterado nesta auditoria.
+
+### Fontes e premissas verificadas
+
+- Repositorio local como fonte de verdade: `server.ts`, `server/ai.ts`, `server/parsers.ts`, `src/App.tsx`, `src/components/MaterialInput.tsx`, `src/lib/api.ts`, `vite.config.ts`, `package.json`, `.env.example` e `.gitignore`.
+- Documentacao oficial da [Vercel para Express](https://vercel.com/docs/frameworks/backend/express): uma aplicacao Express pode virar uma unica Function; `express.static()` nao serve os assets nesse ambiente.
+- Limites oficiais de [Vercel Functions](https://vercel.com/docs/functions/limitations): payload maximo de 4,5 MB para request e response, bundle descompactado de 250 MB e memoria dependente do plano/configuracao.
+- Configuracao oficial de [duracao de Functions](https://vercel.com/docs/functions/configuring-functions/duration): a plataforma encerra a Function quando `maxDuration` e atingido; os limites dependem do plano e de Fluid Compute e devem ser confirmados no projeto no momento do deploy.
+- Escopos oficiais de [variaveis de ambiente](https://vercel.com/docs/environment-variables): Development, Preview e Production sao ambientes separados e alteracoes exigem novo deploy.
+- [Runtime Logs da Vercel](https://vercel.com/docs/logs/runtime): saidas de `console.log`, `console.warn` e `console.error` das Functions ficam disponiveis nos logs de Preview e Production.
+- [Retencao de dados da Gemini](https://ai.google.dev/gemini-api/docs/zdr): a politica varia conforme modalidade e recursos usados; servicos pagos ainda podem registrar prompts e respostas por periodo limitado para monitoramento de abuso, salvo condicoes especificas de ZDR. O projeto atual nao usa File API, grounding, Interactions API nem explicit context caching.
+- Nao foram assumidos valores fixos de preco, quota, RPM, TPM ou permanencia de plano gratuito. Limites e cobranca devem ser reconfirmados antes da abertura do piloto.
+
+### Compatibilidade atual com Vercel
+
+| Parte | Diagnostico | Consequencia |
+| --- | --- | --- |
+| React/Vite | Compativel como site estatico; `vite build` gera `dist/index.html` e assets | Pode permanecer como frontend, com rewrite SPA para rotas de interface |
+| Express | Reaproveitavel como Function Node.js unica | Precisa exportar o app/handler e nao chamar `app.listen` na execucao serverless |
+| `server.ts` | Mistura criacao do app, rotas, Vite middleware, arquivos estaticos e inicializacao da porta 3000 | Precisa separar o app/handler serverless do entrypoint local |
+| `/api/*` | Rotas Express sao conceitualmente compativeis | Precisam ser encaminhadas para a Function sem cair no fallback SPA |
+| Vite middleware | Adequado apenas ao desenvolvimento local atual | Nao deve ser criado dentro da Function; a Vercel serve o build estatico |
+| Build atual | Passa localmente, mas produz tambem `dist/server.cjs` para processo Node persistente | O build/deploy precisa declarar output estatico e entrada da Function |
+| `npm start` | Inicia `dist/server.cjs`, define producao e escuta `0.0.0.0:3000` | Nao e o mecanismo de execucao de uma Vercel Function |
+| `express.static()` | Funciona no servidor de producao local | E ignorado no modelo Express da Vercel e nao pode ser a estrategia do deploy |
+
+Adaptacao recomendada: preservar o Express e suas rotas, extrair a construcao do `app` para um modulo importavel, manter um entrypoint exclusivo para desenvolvimento/local e criar uma entrada serverless que exporte o app. Adicionar configuracao de build, rewrites e duracao para que `/api/*` chegue a Function e as demais rotas recebam o SPA. Nao ha necessidade de migrar para Next.js nem de criar uma Function por rota para este piloto.
+
+Arquivos que provavelmente precisariam ser alterados ou criados na implementacao:
+
+- `server.ts`: separar inicializacao local de construcao/exportacao do Express, ou ser substituido por dois entrypoints pequenos.
+- Um novo modulo de app/handler, por exemplo `server/app.ts` e/ou `api/index.ts`: expor o Express a Vercel sem abrir porta.
+- `package.json`: ajustar scripts/build para o alvo Vercel, preservando o desenvolvimento local.
+- Novo `vercel.json`: declarar build/output, rewrites SPA/API e `maxDuration` compativel.
+- `src/components/MaterialInput.tsx`: alinhar limite e mensagem do cliente ao limite seguro real.
+- `server.ts` ou middleware dedicado: limites de upload/body, validacao, protecao de abuso, headers e erros publicos.
+- Possivelmente `server/ai.ts`: alinhar o orcamento total de timeout/retry e reduzir diagnosticos de log.
+- `.env.example`: remover a premissa de AI Studio em `APP_URL` e documentar somente variaveis efetivamente usadas, caso a implementacao do piloto confirme isso.
+
+### Uploads, memoria e payload
+
+- Multer usa `memoryStorage()`: o arquivo inteiro fica em um `Buffer` na RAM da Function e nao e gravado em disco pelo codigo.
+- PDF e DOCX sao processados a partir desse buffer; TXT e qualquer arquivo nao reconhecido caem atualmente no caminho de texto UTF-8.
+- O pico de memoria e maior que o tamanho do upload: coexistem buffer multipart, estruturas internas de `pdf-parse`/Mammoth, texto extraido, objetos de resposta e serializacao JSON. PDF pode exigir memoria e CPU muito superiores ao tamanho compactado; DOCX tambem pode expandir fortemente.
+- O limite Multer de 30 MB e ineficaz na Vercel: a plataforma rejeita acima de 4,5 MB antes que esse limite seja util. Multipart ainda adiciona overhead, portanto o teto do aplicativo deve ficar abaixo de 4,5 MB, com margem medida, e nao exatamente em 4,5 MB.
+- Mesmo um arquivo que caiba no request pode produzir texto extraido maior que 4,5 MB na response de `/api/materials/extract`. Em seguida, `/api/ai/structure` recebe esse texto novamente, sujeito ao limite de request JSON. Esse desenho exige limite tambem no tamanho do texto extraido, nao apenas no arquivo.
+- `/api/ai/structure` envia no maximo 50.000 caracteres do texto para a Gemini, mas o backend recebe o `rawText` inteiro antes de truncar. `/api/ai/generate` nao possui limite explicito para `combinedContent`.
+- O modelo em memoria e aceitavel apenas para arquivos pequenos e com concorrencia baixa, depois de limites conservadores e testes. Para arquivos realmente grandes, seria necessario upload direto/storage ou processamento diferente, o que contraria o escopo sem persistencia deste piloto; portanto arquivos grandes devem ser recusados.
+
+### Rotas de IA, duracao e falhas
+
+- `/api/ai/structure` envia titulo e ate 50.000 caracteres do material para a Gemini e pede topicos, resumos, conceitos e trechos.
+- `/api/ai/generate` envia titulo, topicos selecionados, conteudo combinado, modo, dificuldade e quantidades; recebe as atividades e referencias.
+- O timeout atual e por tentativa: 60 segundos por padrao. Com tres tentativas e backoff exponencial inicial de 1.200 ms mais jitter, a duracao teorica pode superar 183 segundos, sem contar parsing, serializacao e overhead da plataforma.
+- Timeout local nao recebe retry. Falhas HTTP 429, 500, 502, 503 e 504 e algumas falhas de rede recebem retry. Ao final, 429 vira `AI_RATE_LIMIT`, 503 vira `AI_UNAVAILABLE`, timeout local vira 504 `AI_REQUEST_TIMEOUT`; outros 500/502/504 do provedor podem terminar como `500 AI_PROCESSING_ERROR`.
+- A Function pode ser encerrada pela Vercel antes do timeout do aplicativo se `maxDuration` for menor que todo o orcamento de tentativas. Nesse caso, o cliente recebe o 504 da plataforma (`FUNCTION_INVOCATION_TIMEOUT`), nao necessariamente o JSON sanitizado da aplicacao, e o `finally` do frontend ainda encerra o loading apos a requisicao falhar.
+- Antes do piloto, `maxDuration`, `AI_REQUEST_TIMEOUT_MS`, numero de tentativas e backoff devem formar um orcamento total com margem para parsing e resposta. Nao se deve simplesmente elevar a duracao maxima: isso amplia exposicao a abuso e custo.
+
+### Variaveis de ambiente para Vercel
+
+Somente estes nomes sao consumidos pelo backend de IA:
+
+| Nome | Necessidade | Development | Preview | Production |
+| --- | --- | --- | --- | --- |
+| `GEMINI_API_KEY` | Obrigatoria | sim, se testar Gemini via `vercel dev` | sim, para o piloto em Preview | somente se houver deploy Production |
+| `AI_MODEL` | Opcional, mas recomendada para fixar modelo testado | sim | sim | sim, se Production for usado |
+| `AI_REQUEST_TIMEOUT_MS` | Opcional, recomendada para alinhamento explicito | sim | sim | sim, se Production for usado |
+| `AI_MAX_ATTEMPTS` | Opcional, recomendada para controle de duracao/custo | sim | sim | sim, se Production for usado |
+| `AI_RETRY_INITIAL_BACKOFF_MS` | Opcional, recomendada para controle de retry | sim | sim | sim, se Production for usado |
+
+`NODE_ENV`, `VERCEL` e `VERCEL_ENV` sao fornecidas/controladas pela plataforma e nao devem receber segredo manual. `APP_URL` nao e consumida pelo codigo. `DISABLE_HMR` so afeta o servidor Vite local e nao e necessaria na Function. Nenhuma variavel de banco, Supabase, Drive ou storage e necessaria. Para um piloto apenas em Preview, nao e necessario copiar a chave para Production; cada ambiente deve usar credencial/quota separada quando isso for operacionalmente possivel.
+
+### Privacidade, transito e persistencia
+
+- Nao existe escrita em disco pelo codigo da aplicacao. Multer mantem o arquivo em RAM; parsers recebem buffers. O filesystem efemero da Function tampouco e usado.
+- Nao existe banco, Supabase, Google Drive, Vercel Blob, cache persistente, fila, `localStorage`, `sessionStorage` ou IndexedDB.
+- Perfis, projetos, material bruto, topicos, configuracao, atividades, respostas e pontuacao ficam apenas no estado React da aba. Recarregar/fechar perde esse estado.
+- Durante extracao, o arquivo completo e titulo transitam do navegador pela rede/infraestrutura da Vercel ate a Function; texto extraido completo retorna ao navegador.
+- Na estruturacao, titulo e texto extraido completo transitam novamente ate a Function; titulo e amostra de ate 50.000 caracteres sao enviados a Gemini, junto com system instruction e schema. Topicos/resumos/trechos gerados retornam por Gemini e Vercel.
+- Na geracao, titulo, topicos, modo, dificuldade, quantidades e conteudo combinado transitam por Vercel e Gemini; flashcards, questoes, gabaritos, explicacoes, referencias e avisos retornam pelo mesmo caminho.
+- O SDK usado faz chamadas `generateContent` diretas; nao ha upload para Gemini File API, cache explicito, grounding ou armazenamento de conversacao no codigo.
+- Assim, o piloto pode nao armazenar material ou historico na aplicacao, mas nao deve ser descrito como retencao zero sem validar contrato/plano/configuracao da Gemini e politicas da Vercel. O usuario externo deve ser informado de que o conteudo e processado por ambos os provedores e orientado a nao enviar material pessoal, sigiloso ou sem autorizacao.
+
+### Auditoria de logs
+
+| Dado | Situacao atual | Risco |
+| --- | --- | --- |
+| Texto extraido e arquivo | Nao sao logados deliberadamente no caminho de sucesso | Baixo no sucesso; objetos de erro de parser/middleware podem incluir metadados ou detalhes inesperados de bibliotecas |
+| Prompts e respostas Gemini | Nao ha `console` explicito desses conteudos | Podem aparecer indiretamente se o SDK incluir request/response ou trecho do prompt em `message`/`stack` de erro |
+| Erros de IA | `getAIErrorDiagnostics` registra nome, status, codigo, mensagem e stack, redigindo chave e parametros comuns | Redacao protege a credencial conhecida, mas nao remove conteudo do usuario eventualmente incorporado no erro |
+| Erros de extracao | Parser e handler registram o objeto de erro; resposta publica reutiliza `error.message` | Pode expor detalhes internos nos Runtime Logs e no frontend; precisa sanitizacao antes do piloto |
+| Erro global de API | Registra o erro completo e devolve `err.message`/`err.code` | Pode registrar e expor detalhe de Multer/parser; precisa resposta publica controlada e log minimo |
+| Frontend | Registra URL, status, chaves de resposta e objetos de erro no console do navegador | Nao vai para Runtime Logs da Vercel por si so, mas pode revelar respostas/diagnosticos a quem usa o navegador; `data` completo e logado apenas nas respostas de erro |
+
+Conclusao de logs: o sucesso comum nao imprime material, prompt ou resposta da Gemini no backend, mas nao ha garantia forte contra vazamento por excecoes de terceiros. Antes do piloto, logs server-side devem usar campos permitidos e mensagens normalizadas, sem `stack`/`message` brutos de SDK ou parser em ambiente externo. Nao ativar log de body, multipart, prompt ou response no painel/plataforma.
+
+### Seguranca minima do piloto
+
+| Item | Classificacao | Motivo |
+| --- | --- | --- |
+| Rate limiting por origem/IP nas rotas de IA e upload | obrigatorio antes do piloto | URL publica e chave server-side permitem consumo automatizado e custo; a Vercel oferece regra de rate limiting, cuja disponibilidade/preco deve ser confirmada |
+| Limite de arquivo e de texto extraido | obrigatorio antes do piloto | 30 MB contradiz o teto de 4,5 MB; expansao do documento pode estourar response, proxima request e memoria |
+| Validacao de extensao, MIME e assinatura/conteudo | obrigatorio antes do piloto | Hoje extensao ou MIME isolados selecionam parser e qualquer outro arquivo vira TXT; `accept` do navegador nao e controle de seguranca |
+| Limites server-side de contagens, conteudo e combinacao de atividades | obrigatorio antes do piloto | Cliente e chamadas diretas podem pedir quantidades/textos arbitrarios e multiplicar tokens, duracao e custo |
+| Protecao contra abuso/custo da Gemini | obrigatorio antes do piloto | Inclui rate limit, orcamento de timeout/retry, chave restrita ao projeto/API quando suportado, monitoramento/alertas e forma de desligar o piloto |
+| Sanitizacao de erros/logs de extracao e middleware global | obrigatorio antes do piloto | Atualmente mensagens e objetos tecnicos podem chegar ao cliente ou aos Runtime Logs |
+| CORS/origin policy | pode esperar para o piloto de mesma origem | O frontend usa URLs relativas e nao precisa CORS. CORS nao substitui autenticacao nem impede chamadas diretas; uma verificacao de origem e recomendavel como camada adicional, nao como defesa principal |
+| Headers basicos (`nosniff`, frame policy/CSP, referrer policy) | recomendavel | Reduz superficie do frontend, mas nao resolve o principal risco de custo; deve ser aplicado sem quebrar Vite/assets |
+| Autenticacao de usuario | pode esperar conforme o escopo | Nao e necessaria para provar o fluxo, desde que o acesso seja curto/controlado e existam controles de abuso. Protecao de acesso ao Preview, se usada, deve permitir o usuario piloto |
+| Scanner/antivirus de arquivos | pode esperar no piloto restrito | O codigo apenas interpreta em memoria e nao redistribui arquivos; parsers ainda devem estar atualizados e entradas devem ser pequenas/validadas |
+
+### Riscos de custo
+
+- Vercel: invocacoes, CPU de parsing, memoria provisionada, duracao enquanto aguarda Gemini, transferencia e regras de firewall podem ter quota ou cobranca conforme o plano vigente. PDFs e concorrencia elevam CPU/memoria; retries elevam duracao.
+- Gemini: cada material normalmente causa ao menos uma estruturacao e uma geracao; retries podem repetir chamadas. Entrada longa, muitos itens e respostas extensas elevam tokens. 429 nao deve ser tratado como garantia de custo zero.
+- Ausencia de autenticacao: qualquer pessoa ou bot que descubra a URL pode chamar `/api/ai/*` diretamente, ignorar limites da interface e consumir a chave. Preview URL obscura nao e controle de acesso.
+- Upload: embora nao haja storage, transferencia e processamento ainda consomem recursos. Repeticao de arquivos compactos que expandem muito pode causar pressao de memoria/CPU.
+- Controles minimos: limite curto por IP/origem, tetos de contagem e caracteres, tamanho conservador, menor retry aceitavel, observabilidade sem conteudo, alertas/orcamentos nos provedores e procedimento de revogar chave/desativar deployment.
+
+### Estrategia de branch
+
+- Manter `main` como Marco 1 estavel e nao fazer nela as adaptacoes experimentais inicialmente.
+- Criar, em tarefa posterior, `piloto-vercel` a partir do `main` limpo.
+- Configurar essa branch como Preview e restringir `GEMINI_API_KEY`/demais variaveis ao Preview ou especificamente a essa branch; nao criar a branch nem vincular o projeto nesta auditoria.
+- Fazer somente nessa branch a separacao do handler, configuracao Vercel e controles minimos. Validar Preview, limites, logs, custo e rollback.
+- Depois do piloto, revisar commits individualmente e decidir por PR quais alteracoes genericas e comprovadas retornam a `main`; configuracoes temporarias de acesso/limite podem permanecer especificas do piloto.
+
+### Matriz curta de teste de esforco
+
+| Cenario | Observar |
+| --- | --- |
+| TXT pequeno | upload, extracao fiel, latencia, memoria, payload e ausencia de conteudo em logs |
+| DOCX pequeno | MIME/assinatura, extracao, expansao do texto, latencia e descarte do buffer |
+| PDF pequeno | paginas, texto, CPU/memoria, tempo de parser e erros controlados |
+| PDF medio | tamanho request/response, pico de memoria, duracao total e legibilidade do texto |
+| PDF grande dentro do novo limite seguro | rejeicao antecipada se texto expandir alem do teto, ausencia de 413 inesperado e funcao sem OOM |
+| Poucos itens | schema, quantidades, qualidade, tokens/latencia e custo de referencia |
+| Muitos itens ate o teto permitido | validacao do teto, tamanho da resposta, duracao, qualidade e consumo relativo |
+| Gemini lenta | progresso, orcamento Function/aplicacao, cancelamento e loading encerrado |
+| Gemini 429 | retries limitados, status/codigo publico, sem detalhe de provedor e sem tempestade de novas chamadas |
+| Gemini 503 | backoff, numero maximo de tentativas, 503 final sanitizado e duracao total |
+| Timeout | 504 JSON da aplicacao antes do limite Vercel; diferenciar de `FUNCTION_INVOCATION_TIMEOUT` |
+| Mobile | upload suportado, progresso, recuperacao de erro, responsividade e rede lenta/interrompida |
+| Dois usuarios simultaneos | isolamento de dados, concorrencia, memoria, latencia, rate limit sem colisao indevida e nenhuma mistura de respostas |
+| Varias requisicoes sequenciais | ausencia de crescimento de memoria, limites/retries, estabilidade de latencia e consumo acumulado |
+
+Antes desses cenarios, medir o tamanho real do multipart, texto extraido, JSON das duas rotas e resposta, sempre sem registrar o conteudo.
+
+### Testes executados
+
+| Teste | Resultado |
+| --- | --- |
+| Leitura integral de `GUIA_CODEX.md` | concluida; regras de escopo, segredo, custo, npm e relatorio observadas |
+| Inspecao estatica da arquitetura, uploads, parsers, IA, frontend, ambiente e logs | concluida; achados registrados acima |
+| Busca por persistencia e integracoes no codigo atual | nenhuma escrita em disco, banco, Supabase, Drive, storage ou Web Storage encontrada |
+| Verificacao de arquivos de ambiente versionados | somente `.env.example` esta versionado; `.env*` permanece ignorado |
+| `npm run lint` (`tsc --noEmit`) | passou sem erros |
+| `npm run build` | passou; frontend Vite e bundle Node atual foram gerados |
+| Deploy ou teste na Vercel | nao executado; exigiria adaptacao e mudanca externa, proibidas nesta etapa |
+| Teste de carga real | nao executado; matriz proposta para depois da implementacao minima |
+
+### Respostas objetivas
+
+1. O projeto pode ser publicado na Vercel? Sim, apos uma adaptacao pequena de empacotamento/entrada serverless e controles minimos; o codigo atual nao deve ser enviado como piloto externo sem isso.
+2. Precisa adaptacao de arquitetura? Sim. Express pode permanecer, mas deve ser exportado como Function; Vite/static e servidor local devem ser separados do handler.
+3. Quais arquivos precisariam mudar? `server.ts`, `package.json`, limite exibido em `src/components/MaterialInput.tsx`, possivelmente `server/ai.ts` e `.env.example`, mais novos arquivos de app/handler e `vercel.json`.
+4. Existe bloqueio real? Sim: upload anunciado/aceito em 30 MB contra payload maximo de 4,5 MB, fluxo de texto que pode exceder request/response, `app.listen`/static server no entrypoint atual e ausencia de protecao minima contra abuso.
+5. O que corrigir antes? Handler serverless, roteamento/static, limite conservador de arquivo e texto, validacao real de tipo, tetos de contagem/conteudo, rate limit/protecao de custo, timeouts coerentes e logs/erros de extracao sanitizados.
+6. O que pode esperar? Autenticacao completa, persistencia, Supabase, Drive, storage, antivirus dedicado, CORS para origens externas e endurecimento avancado de headers, desde que o piloto seja curto e controlado.
+7. O piloto pode ocorrer sem armazenar material/historico? Sim no codigo da aplicacao, mantendo tudo efemero; isso nao equivale automaticamente a ZDR contratual nos provedores.
+8. Quais dados transitam? Arquivo e texto por navegador/Vercel; titulo, amostra/conteudo selecionado, topicos, configuracao e prompts pela Gemini; topicos, atividades, gabaritos, explicacoes e referencias retornam por Gemini/Vercel.
+9. Estrategia de branch? Preservar `main`, criar depois `piloto-vercel`, usar Preview e so reintegrar por PR o que for validado.
+10. Plano minimo antes do deploy? Separar/exportar Express; configurar build, rewrites e duracao; reduzir e validar payloads; impor tetos; sanitizar logs/erros; configurar variaveis somente nos ambientes usados; ativar rate limit/controles de custo; executar `vercel dev`, Preview e a matriz critica antes de convidar o usuario.
+
+### Problemas encontrados
+
+1. Limite local de 30 MB incompativel com payload maximo de 4,5 MB das Functions.
+2. O texto extraido completo cruza a Function tres vezes no fluxo (response de extracao, request de estrutura e, conforme selecao/fallback, request de geracao), podendo ultrapassar limites e ampliando exposicao de dados.
+3. O entrypoint atual abre porta, monta Vite ou `express.static()` e nao exporta um handler serverless.
+4. Nao ha limite server-side maximo para texto extraido, `combinedContent` ou contagens de atividades.
+5. Validacao aceita arquivo por MIME ou extensao e trata qualquer formato restante como texto.
+6. Erros de parser/middleware ainda usam objetos e mensagens tecnicas brutas em log/resposta.
+7. Orcamento maximo de retry pode se aproximar do limite da Function e precisa configuracao explicita.
+8. Sem autenticacao/rate limit, endpoints Gemini ficam sujeitos a chamada direta e consumo indevido.
+9. O `TAREFA_ATUAL.md` do repositorio ainda descreve uma tarefa anterior; esta auditoria seguiu a solicitacao explicita atual sem altera-lo.
+
+### Estado atual
+
+- Marco 1 local permanece intacto, com TypeScript e build aprovados.
+- O projeto e tecnicamente adaptavel a Vercel sem persistencia e sem reescrita de framework.
+- Ainda nao esta pronto para um piloto externo na Vercel pelos bloqueios de payload, entrada serverless e protecao de custo/abuso.
+
+### Pendencias
+
+- Autorizar e implementar em tarefa separada o plano minimo na branch de piloto.
+- Confirmar plano/Fluid Compute, duracao, regiao, quotas, cobranca e politica de dados vigentes nas contas Vercel e Gemini usadas.
+- Definir limite seguro por medicao, abaixo de 4,5 MB e tambem baseado no texto extraido.
+- Definir janela/duracao do piloto, usuario autorizado, monitoramento e criterio de interrupcao.
+
+### Proximos passos recomendados
+
+1. Criar `piloto-vercel` somente apos autorizacao e implementar a menor separacao possivel entre app Express, servidor local e handler.
+2. Aplicar primeiro os controles obrigatorios de payload, tipo, contagem, logs, timeout e abuso.
+3. Configurar apenas o ambiente Preview e validar com `vercel dev` e Preview real.
+4. Executar a matriz critica, inspecionar Runtime Logs sem conteudo e medir consumo antes de compartilhar a URL.
+
+---
+
+## Implementacao minima para o piloto Vercel (31/08/2026)
+
+### Resumo
+
+- Criada a branch `piloto-vercel` a partir do mesmo commit de `main`, mantendo `main` apontada para `3435fd5b8b256937364f80e57c4a33ce02d4f14a` e sem commits ou alteracoes aplicados nela.
+- Separada a aplicacao Express da inicializacao local: as rotas e protecoes agora ficam em `server/app.ts`, `server.ts` continua sendo o entrypoint local e `api/index.ts` exporta o mesmo app como Vercel Function sem `app.listen`, Vite middleware ou `express.static()`.
+- Adicionada configuracao Vercel para build Vite estatico, Function Express, rewrite de `/api/*`, fallback SPA e `maxDuration` de 120 segundos.
+- Implementados limites de upload, texto, geracao e rate limit em memoria, validacao de PDF/DOCX/TXT, erros/logs sanitizados, headers basicos e aviso curto de privacidade.
+- Nenhuma persistencia, autenticacao, Supabase, Google Drive, storage ou dependencia nova foi adicionada. Nenhum deploy ou projeto Vercel foi criado.
+
+### Arquivos alterados
+
+- `server/app.ts`: novo modulo compartilhado com Express, rotas, limites, validacoes, rate limit, headers e erros publicos.
+- `api/index.ts`: novo handler serverless que exporta o Express.
+- `server.ts`: reduzido ao servidor local, com Vite em desenvolvimento e arquivos estaticos apenas na producao Node local.
+- `vercel.json`: build/output, Function, duracao e rewrites.
+- `server/ai.ts`: defaults de timeout/retry alinhados e diagnostico externo sem stack/mensagem bruta.
+- `server/parsers.ts`: removidos logs e mensagens brutas dos parsers.
+- `src/components/MaterialInput.tsx`: limite visual de 3 MB e aviso discreto de privacidade.
+- `.env.example`: somente variaveis consumidas, sem valor real e sem `APP_URL` nao utilizada.
+- `RELATORIO_CODEX.md`: registro da implementacao e dos testes.
+
+### Arquitetura resultante
+
+1. `createApp()` constroi o Express e registra `/api/health`, `/api/materials/extract`, `/api/ai/structure` e `/api/ai/generate`.
+2. `server.ts` chama `createApp()`, monta Vite somente em desenvolvimento e abre a porta local. Em producao Node local, serve `dist` para preservar `npm start`.
+3. `api/index.ts` chama `createApp()` e exporta o resultado; nao abre porta nem importa Vite.
+4. Na Vercel, `dist` e o frontend estatico, `/api/:path*` e reescrito para a Function e o restante recebe `index.html` para o SPA.
+5. A Function e o servidor local usam exatamente as mesmas rotas e validacoes.
+
+### Limites adotados
+
+| Recurso | Limite | Decisao |
+| --- | --- | --- |
+| Arquivo multipart | 3 MB, um arquivo por request | Mantem margem de aproximadamente 1,5 MB sob o teto de 4,5 MB da Vercel para headers e multipart |
+| Campos multipart | 2 campos; 8 KB por campo | Aceita `file` e `title` sem campos arbitrariamente grandes |
+| JSON | 2 MB | Rejeita body grande antes de parsing/memoria excessivos |
+| Texto extraido, colado ou `rawText` | 500.000 caracteres | Mantem resposta de extracao e request de estrutura abaixo do teto em conteudo textual normal; rejeita, sem truncar silenciosamente |
+| `combinedContent` | 100.000 caracteres | Limita tokens, duracao e custo da geracao |
+| Titulo | 200 caracteres | Evita metadado arbitrariamente grande |
+| Topicos selecionados | 8; titulo 200 e resumo 2.000 caracteres por topico | Coerente com a estruturacao existente e limita o prompt |
+| Flashcards | 10 | Teto server-side independente do frontend |
+| Multipla escolha | 10 | Teto server-side independente do frontend |
+| Verdadeiro/falso | 10 | Teto server-side independente do frontend |
+| Total de atividades | 20 | Evita combinar os tres tetos em 30 itens numa unica chamada |
+
+O limite de caracteres complementa, mas nao substitui, o limite de bytes imposto pela Vercel. O piloto deve medir payloads reais no Preview; documentos compactados com expansao acima do teto sao rejeitados depois da extracao e antes de devolver o texto.
+
+### Validacao de arquivos
+
+- Somente extensoes `.pdf`, `.docx` e `.txt` sao aceitas.
+- A extensao deve ser compativel com um MIME permitido; `application/octet-stream` e aceito como fallback comum de navegador, mas nao elimina a verificacao de conteudo.
+- PDF exige `%PDF-` nos primeiros 1.024 bytes.
+- DOCX exige assinatura ZIP e entradas basicas `[Content_Types].xml` e `word/`.
+- TXT rejeita byte nulo e decodificacao UTF-8 com caractere de substituicao.
+- Arquivos desconhecidos nao sao mais tratados como TXT.
+- Multer devolve JSON sanitizado para excesso de tamanho ou multipart invalido.
+
+### Protecao de abuso e custo
+
+- Rate limit em memoria, por IP e janela fixa de 10 minutos: 15 extracoes, 10 estruturacoes e 10 geracoes por instancia aquecida.
+- Respostas bloqueadas usam HTTP 429, `RATE_LIMITED`, `Retry-After` e headers `RateLimit-*`.
+- O limite em memoria protege o processo local e uma instancia aquecida, mas nao e global entre Functions/instancias e reinicia em cold start. Ele nao deve ser a unica barreira externa.
+- Antes de compartilhar o Preview, configurar no Vercel Firewall uma regra de rate limiting sem servico adicional: caminho iniciando por `/api/`, excluindo `/api/health`, chave IP, fixed window de 10 minutos, limite inicial de 30 requests e acao 429. Confirmar no painel a disponibilidade e eventual cobranca vigente antes de publicar a regra.
+- Os limites de caracteres, topicos e atividades impedem que uma chamada direta ignore os controles visuais e solicite payload/saida arbitrarios.
+- O app desativa `X-Powered-By` e aplica `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` e `Referrer-Policy: strict-origin-when-cross-origin`. CSP complexa nao foi adicionada.
+
+### Timeout e retry
+
+- `AI_REQUEST_TIMEOUT_MS`: default reduzido de 60.000 para 45.000 ms por tentativa.
+- `AI_MAX_ATTEMPTS`: default reduzido de 3 para 2.
+- `AI_RETRY_INITIAL_BACKOFF_MS`: default ajustado de 1.200 para 1.000 ms, ainda com jitter de ate 400 ms.
+- `maxDuration`: 120 segundos na Function.
+- Pior caso nominal da IA: duas tentativas de 45 segundos e um backoff de ate 1,4 segundo, aproximadamente 91,4 segundos. Restam cerca de 28,6 segundos para parsing, inicializacao, serializacao e resposta antes do limite da Function.
+- Timeout local continua sem retry. 429 e 503 continuam transitorios e recebem no maximo a segunda tentativa.
+
+### Logs, erros e privacidade
+
+- Parsers nao registram mais o objeto bruto nem incorporam `error.message` de biblioteca no erro propagado.
+- O middleware global registra somente `name`, `code` e status; nao registra body, arquivo, texto, prompt, resposta ou stack.
+- Erros de IA em Preview/Production registram somente nome, status e codigo. Mensagem tecnica redigida fica disponivel apenas quando `NODE_ENV=development`; stack foi removida do diagnostico.
+- Respostas publicas de upload, body parsing, validacao e falhas internas usam codigos/mensagens controlados.
+- A tela informa que o processamento e temporario, que a aplicacao nao armazena os arquivos, que infraestrutura/IA externas processam o conteudo e que dados sensiveis, sigilosos ou sem autorizacao nao devem ser enviados.
+- Todo estado funcional continua apenas no React; nenhum mecanismo de persistencia foi criado.
+
+### Variaveis de ambiente
+
+`.env.example` agora documenta somente nomes consumidos:
+
+- `GEMINI_API_KEY`;
+- `AI_MODEL`;
+- `AI_REQUEST_TIMEOUT_MS`;
+- `AI_MAX_ATTEMPTS`;
+- `AI_RETRY_INITIAL_BACKOFF_MS`;
+- `PORT`, opcional apenas para o servidor Node local;
+- `DISABLE_HMR`, opcional apenas para Vite local.
+
+Nenhum valor real foi lido para o relatorio, exibido ou versionado. `.env` continua ignorado.
+
+### Testes executados
+
+| Teste | Resultado |
+| --- | --- |
+| Branch atual e ancestria | `piloto-vercel`; `main`, `HEAD` inicial e merge-base no mesmo commit `3435fd5...`; main intacta |
+| `npm run lint` | passou sem erros apos as alteracoes |
+| `npm run build` | passou; 1.686 modulos Vite e bundle Node gerados |
+| Servidor do build em porta isolada | passou em `http://localhost:3101`; frontend `200 text/html` |
+| `/api/health` | `200 application/json`; headers `nosniff`, `DENY` e referrer policy presentes; `X-Powered-By` ausente no novo servidor |
+| Upload TXT pequeno | `200`, tipo `txt`, 11 palavras |
+| Upload DOCX pequeno em memoria | `200`, tipo `docx`, 7 palavras |
+| Upload PDF minimo em memoria | `200`, tipo `pdf`; documento sem paginas/texto usado somente para validar transporte/parser |
+| Arquivo `.exe` | `415 UNSUPPORTED_FILE_TYPE` |
+| PDF com extensao/MIME corretos e assinatura invalida | `415 INVALID_FILE_SIGNATURE` |
+| Arquivo com 3 MB + 1 byte | `413 FILE_TOO_LARGE` |
+| Texto colado com 500.001 caracteres | `413 TEXT_TOO_LARGE` |
+| `rawText` com 500.001 caracteres | `413 TEXT_TOO_LARGE`, antes da Gemini |
+| `combinedContent` com 100.001 caracteres | `413 TEXT_TOO_LARGE`, antes da Gemini |
+| Flashcards acima de 10 | `400 INVALID_ACTIVITY_COUNT` |
+| Total acima de 20 | `400 TOO_MANY_ACTIVITIES` |
+| Rate limit local | passou; requests excedentes receberam `429 RATE_LIMITED` |
+| Mapeamento controlado 429 | `429 AI_RATE_LIMIT`, sem detalhe tecnico publico |
+| Mapeamento controlado 503 | `503 AI_UNAVAILABLE`, sem detalhe tecnico publico |
+| Retry controlado 503 | passou; falha inicial e sucesso na segunda tentativa |
+| Timeout controlado de 20 ms | passou; `AI_REQUEST_TIMEOUT`, uma tentativa e sem retry |
+| `git diff --check` | passou; apenas avisos esperados de conversao LF/CRLF no Windows |
+
+Os arquivos de teste foram construidos em memoria e nao foram adicionados ao repositorio. Os testes controlados de IA nao fizeram chamada externa nem consumiram a chave.
+
+### Problemas encontrados
+
+1. `npm run dev` nao iniciou neste ambiente porque o Node/`tsx` falhou antes de carregar `server.ts`: `uv_os_get_passwd returned ENOMEM` ao consultar o usuario do Windows. O mesmo ocorreu com Node 24 e Node 22. O build e o servidor Node de producao iniciaram e responderam normalmente, indicando falha ambiental anterior a aplicacao, mas o comando de desenvolvimento permanece sem validacao runtime nesta maquina nesta tarefa.
+2. A porta 3000 ja estava ocupada por outro processo Express anterior. O novo servidor foi testado isoladamente pela nova variavel opcional `PORT` em 3101, sem encerrar processo alheio.
+3. `vercel dev` nao foi executado porque a Vercel CLI nao esta instalada. Nao foi baixada nem instalada dependencia fora do projeto sem autorizacao.
+4. O rate limit em memoria nao e distribuido; a regra do Vercel Firewall e pendencia obrigatoria antes de abrir o Preview externo.
+5. O rewrite e o empacotamento foram validados por TypeScript/build e comparados com a documentacao oficial, mas precisam do teste `vercel dev` e Preview real antes do piloto.
+
+### Resultados
+
+- O projeto esta preparado em codigo para frontend Vite estatico e Express serverless, preservando o servidor local.
+- Upload e texto excessivos sao rejeitados antes de produzir requests/responses incompativeis com o piloto.
+- Chamadas diretas nao conseguem ultrapassar os tetos documentados de geracao.
+- Tipos desconhecidos e assinaturas basicas invalidas sao rejeitados com JSON controlado.
+- Os logs server-side alterados nao incluem conteudo do usuario nem mensagens/stacks brutas em Preview/Production.
+- O orcamento de IA termina com margem antes de `maxDuration`.
+
+### Estado atual
+
+- Branch ativa: `piloto-vercel`.
+- `main` permanece apontada para o commit original e nao foi alterada.
+- Alteracoes ainda estao no working tree da branch de piloto; nenhum commit foi criado porque nao foi solicitado.
+- Nenhum deploy, projeto, link ou variavel Vercel foi criado.
+- Nenhuma persistencia ou autenticacao foi implementada.
+
+### Pendencias
+
+- Instalar/usar Vercel CLI somente com autorizacao e executar `vercel dev`.
+- Configurar variaveis no ambiente Preview, sem copiar secrets para Production se ela nao for usada.
+- Configurar e revisar a regra de rate limit no Vercel Firewall antes de compartilhar a URL.
+- Criar Preview real, conferir rewrites, limite/duracao do plano, Runtime Logs e payloads, sem promover para Production.
+- Repetir `npm run dev` quando a falha `uv_os_get_passwd ENOMEM` do ambiente Node/Windows estiver resolvida.
+- Executar no Preview a matriz de concorrencia e carga; testes locais nao simulam multiplas instancias serverless.
+
+### Proximos passos recomendados
+
+1. Corrigir ou contornar a falha ambiental do `tsx` e validar desenvolvimento local na porta livre.
+2. Autorizar a instalacao/execucao da Vercel CLI e testar `vercel dev` sem deploy.
+3. Configurar apenas Preview e sua regra de Firewall, confirmar custos/limites vigentes e realizar um Preview controlado.
+4. Inspecionar Runtime Logs e executar TXT, DOCX, PDF, mobile, dois usuarios e chamadas sequenciais antes de entregar a URL ao usuario externo.
+
+## Correcao do `vercel dev` com Vite (31/08/2026)
+
+### Causa raiz
+
+- O projeto nao declarava explicitamente ao `vercel dev` que o frontend deveria ser iniciado pelo servidor de desenvolvimento do Vite. As exclusoes do fallback SPA liberavam `/@vite/client`, `/@react-refresh` e `/src/*` do rewrite para `index.html`, mas, sem um Development Command Vite explicito, essas URLs nao eram encaminhadas corretamente ao Vite e recebiam HTTP 500.
+- Um fallback SPA amplo tambem nao pode ser usado no desenvolvimento local: no teste controlado ele respondeu `index.html` para as rotas internas do Vite, com HTTP 200 e MIME `text/html`, em vez dos modulos JavaScript.
+
+### Arquivos alterados
+
+- `vercel.json`: declarados o framework Vite e o Development Command que recebe a porta reservada pelo `vercel dev`; mantido o rewrite da API e restringido o fallback SPA para nao capturar namespaces internos do Vite nem assets compilados.
+- `RELATORIO_CODEX.md`: registrado este diagnostico e sua validacao.
+
+### Correcao realizada
+
+- Adicionados `"framework": "vite"` e `"devCommand": "vite --port $PORT"`.
+- Mantido `/api/:path*` encaminhado para `/api/index`.
+- Mantido o fallback para `index.html` somente fora dos prefixos `@`, `src/`, `node_modules/`, `assets/` e `__vite`, preservando as rotas virtuais no desenvolvimento e o filesystem estatico no Preview/Production.
+- Nenhum arquivo de React, Express, IA, seguranca ou servidor local foi alterado.
+
+### Testes
+
+| Teste | Resultado |
+| --- | --- |
+| `vercel dev --listen 3000` com Vercel CLI 59.10.0 | passou; Vite iniciou pelo Development Command e o proxy ficou disponivel em `http://localhost:3000` |
+| `/` no `vercel dev` | `200 text/html`; HTML da aplicacao servido |
+| `/@vite/client` | `200 text/javascript`; modulo Vite servido, sem 500 e sem fallback HTML |
+| `/@react-refresh` | `200 text/javascript`; runtime React Refresh servido, sem 500 e sem fallback HTML |
+| `/src/main.tsx` | `200 text/javascript`; modulo transformado pelo Vite, sem 500 e sem fallback HTML |
+| `/api/health` no `vercel dev` | `200 application/json`; Function Express e rewrite preservados |
+| Rota SPA inexistente no `vercel dev` | `200 text/html`; fallback SPA preservado |
+| `npm run lint` | passou sem erros |
+| `npm run build` | passou; 1.686 modulos Vite e bundle Node gerados |
+| `npm start` na porta 3103 | passou; `/`, asset JS compilado, `/api/health` e rota SPA responderam 200 com os tipos corretos |
+| `npm run dev` na porta 3102 | continua bloqueado antes da aplicacao pelo erro ambiental conhecido `uv_os_get_passwd returned ENOMEM` do `tsx`; a configuracao deste comando nao foi alterada |
+| `git diff --check` | passou; somente aviso esperado de conversao LF/CRLF no Windows |
+
+### Resultado
+
+- `vercel dev` renderiza a aplicacao e entrega normalmente os modulos internos do Vite, enquanto `/api/*` continua na Function Express.
+- O build de Preview/Production continua usando `dist`, e o fallback SPA nao captura os namespaces internos do Vite nem o prefixo de assets compilados.
+- `npm start` permanece funcional. `npm run dev` permanece inalterado e sua validacao continua impedida exclusivamente pela falha ambiental preexistente do Node/Windows.
+- Nenhum deploy foi realizado.
+
+## Consolidacao local da integracao Vercel (04/09/2026)
+
+### Estado consolidado
+
+- A implementacao e as correcoes locais da integracao Vercel foram consolidadas em um unico commit na branch `piloto-vercel`.
+- O commit desta consolidacao e o proprio commit que contem este registro (`HEAD` da branch ao concluir a tarefa). O hash exato e registrado no resultado da tarefa, pois um commit nao pode conter o proprio hash sem altera-lo.
+- Arquivos incluidos: `.env.example`, `.gitignore`, `RELATORIO_CODEX.md`, `api/index.ts`, `server.ts`, `server/ai.ts`, `server/app.ts`, `server/parsers.ts`, `src/components/MaterialInput.tsx` e `vercel.json`.
+- Permanecem validos os testes registrados anteriormente: TypeScript, build Vite/Node, servidor de producao local, rotas e limites da API, uploads TXT/DOCX/PDF, erros controlados, rate limit local e `vercel dev` com frontend Vite, Function Express e fallback SPA.
+- Nenhum deploy ou push foi realizado nesta consolidacao.
+- Proximo passo: configurar as variaveis de ambiente apenas no Preview e gerar um Preview real para validacao controlada.

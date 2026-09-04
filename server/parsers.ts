@@ -28,9 +28,8 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ExtractedDocument>
       pageCount: result?.total || result?.pages?.length || undefined,
       wordCount,
     };
-  } catch (err: any) {
-    console.error('[PDF Parser Error]:', err);
-    throw new Error(`Falha ao ler o arquivo PDF: ${err?.message || 'Formato de PDF inválido ou protegido.'}`);
+  } catch {
+    throw new Error('Falha ao ler o arquivo PDF. O documento pode estar invalido ou protegido.');
   }
 }
 
@@ -43,9 +42,8 @@ export async function parseDocxBuffer(buffer: Buffer): Promise<ExtractedDocument
       text,
       wordCount,
     };
-  } catch (err: any) {
-    console.error('[DOCX Parser Error]:', err);
-    throw new Error(`Falha ao ler o arquivo DOCX: ${err?.message || 'Arquivo corrompido.'}`);
+  } catch {
+    throw new Error('Falha ao ler o arquivo DOCX. O documento pode estar corrompido.');
   }
 }
 

@@ -5,9 +5,9 @@ import { MaterialTopic, Flashcard, MultipleChoiceQuestion, TrueFalseQuestion, Ac
 // Centralized AI configuration with dynamic defaults (no hardcoded quota/RPM assumptions)
 export const AI_CONFIG = {
   getModel: () => process.env.AI_MODEL || 'gemini-3.7-flash',
-  getRequestTimeoutMs: () => readPositiveInteger(process.env.AI_REQUEST_TIMEOUT_MS, 60_000),
-  getMaxAttempts: () => readPositiveInteger(process.env.AI_MAX_ATTEMPTS, 3),
-  getInitialBackoffMs: () => readPositiveInteger(process.env.AI_RETRY_INITIAL_BACKOFF_MS, 1_200),
+  getRequestTimeoutMs: () => readPositiveInteger(process.env.AI_REQUEST_TIMEOUT_MS, 45_000),
+  getMaxAttempts: () => readPositiveInteger(process.env.AI_MAX_ATTEMPTS, 2),
+  getInitialBackoffMs: () => readPositiveInteger(process.env.AI_RETRY_INITIAL_BACKOFF_MS, 1_000),
 };
 
 function readPositiveInteger(value: string | undefined, fallback: number): number {
@@ -118,8 +118,7 @@ export function getAIErrorDiagnostics(error: any) {
     name: String(error?.name || 'Error'),
     status: getErrorStatus(error),
     code: String(error?.code || error?.status || 'UNKNOWN'),
-    message: redactSensitiveTechnicalText(error?.message),
-    stack: redactSensitiveTechnicalText(error?.stack),
+    message: process.env.NODE_ENV === 'development' ? redactSensitiveTechnicalText(error?.message) : undefined,
   };
 }
 

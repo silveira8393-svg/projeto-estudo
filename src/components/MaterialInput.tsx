@@ -325,7 +325,7 @@ export const MaterialInput: React.FC<MaterialInputProps> = ({ onProcessed, isLoa
                     <p className="text-sm font-medium text-zinc-800">
                       Arraste e solte o arquivo aqui ou <span className="text-zinc-900 underline font-semibold">procure no dispositivo</span>
                     </p>
-                    <p className="text-xs text-zinc-500 mt-0.5">Suporta PDF, DOCX e TXT (máximo 30MB)</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">Suporta PDF, DOCX e TXT (máximo 3 MB)</p>
                   </div>
                 </>
               )}
@@ -352,6 +352,12 @@ export const MaterialInput: React.FC<MaterialInputProps> = ({ onProcessed, isLoa
             />
           </div>
         )}
+
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] leading-relaxed text-zinc-600">
+          Os arquivos são processados temporariamente e não são armazenados pela aplicação. O conteúdo passa por
+          serviços externos de infraestrutura e IA. Não envie dados pessoais sensíveis, informações sigilosas ou
+          materiais sem autorização.
+        </div>
 
         {errorMsg && (
           <div className="space-y-2">
