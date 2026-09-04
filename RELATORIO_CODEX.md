@@ -997,3 +997,217 @@ Os arquivos de teste foram construidos em memoria e nao foram adicionados ao rep
 
 - A correcao de empacotamento e este registro permanecem locais e devem ser revisados, consolidados em commit e enviados para `piloto-vercel` antes de qualquer nova etapa.
 - Proximo passo recomendado: consolidar e enviar esses dois arquivos na branch de piloto e confirmar que um Preview criado a partir do Git reproduz o resultado, sem promover para Production.
+
+## Validacao do Preview automatico pelo Git (04/09/2026)
+
+### Resumo
+
+- A correcao de empacotamento do canvas e o registro do primeiro Preview foram consolidados no commit `7d5e3ff` (`fix: incluir canvas no bundle serverless da Vercel`).
+- O push de `piloto-vercel` criou automaticamente um novo Preview pela integracao Git/Vercel.
+- Preview validado: `https://projeto-estudo-osvqckv56-silveira8393-svgs-projects.vercel.app`.
+
+### Arquivos alterados
+
+- `vercel.json`: incluso no commit para garantir o empacotamento de `@napi-rs/canvas` na Function.
+- `RELATORIO_CODEX.md`: incluso no commit com o registro anterior e atualizado localmente com esta validacao final.
+
+### Alteracoes realizadas
+
+- Commit e push exclusivos da branch `piloto-vercel`; `main` permaneceu em `3435fd5`.
+- Nenhuma dependencia foi adicionada ou atualizada.
+- Nenhuma promocao, configuracao ou alteracao de Production foi executada.
+
+### Testes executados
+
+- Deployment automatico `dpl_CubmnDr9C2fZpAJRUTc5EzaQzMtb`: target `preview`, status `Ready`, Function `api/index` com 14,06 MB em `iad1`.
+- `GET /`: `200 text/html`.
+- Asset JavaScript referenciado pelo HTML: `200 application/javascript`.
+- Rota SPA `/preview-fallback-check`: `200 text/html`.
+- `GET /api/health`: `200 application/json`.
+- `POST /api/materials/extract` com texto minimo seguro: `200 application/json`, 13 palavras.
+- `POST /api/ai/structure` com carga minima: `200 application/json`, aproximadamente 4,5 segundos.
+- `POST /api/ai/generate` com um topico e um flashcard: `200 application/json`, aproximadamente 4,0 segundos.
+- Runtime Logs consultados apos os testes.
+
+### Resultados
+
+- A integracao Git/Vercel criou o Preview automaticamente a partir do commit enviado.
+- Frontend, fallback SPA, Function Express, extracao e as duas rotas Gemini funcionaram no Preview.
+- O erro de cold start relacionado a `DOMMatrix` e `@napi-rs/canvas` nao reapareceu nos testes nem nos Runtime Logs.
+
+### Problemas encontrados
+
+- Um teste inicial consultou o nome de asset do Preview anterior e recebeu `404`; o asset efetivamente referenciado pelo HTML do novo build foi identificado e respondeu `200`. Nenhuma correcao de codigo foi necessaria.
+- A listagem da Vercel mostrou um deployment Production mais antigo, anterior a este push. Nenhuma acao foi executada sobre ele nesta tarefa.
+
+### Estado atual
+
+- `piloto-vercel` e `origin/piloto-vercel` contem o commit `7d5e3ff`.
+- O Preview automatico esta `Ready` e validado.
+- `main` e Production nao foram alteradas nesta tarefa.
+- Este registro final permanece como alteracao local nao consolidada para evitar gerar outro Preview automatico nesta mesma tarefa.
+
+### Pendencias
+
+- Consolidar este registro documental em tarefa posterior, considerando que um novo push pode acionar outro Preview automatico.
+- Manter o Preview protegido e nao promover para Production sem autorizacao especifica.
+
+### Proximos passos recomendados
+
+- Definir em tarefa separada os criterios e controles para disponibilizar o Preview ao usuario piloto, sem promover para Production.
+
+## Diagnostico da falha com o PDF DEL1001 (04/09/2026)
+
+### Resumo
+
+- Foi investigado o erro `500 INTERNAL_ERROR` observado no Preview `projeto-estudo-osvqckv56-silveira8393-svgs-projects.vercel.app` ao enviar o arquivo `DEL1001.pdf`, exibido pelo frontend com aproximadamente 2025,7 KB.
+- A camada causadora foi delimitada ao parser de PDF: o upload chegou a Function, foi aceito pelo Multer e passou pela validacao de tipo/assinatura antes de `parsePdfBuffer` devolver um erro generico.
+- A excecao interna exata do `pdfjs-dist` nao pode ser recuperada dos logs atuais porque `server/parsers.ts` captura qualquer erro e o substitui por uma nova mensagem generica; o middleware registra apenas nome, codigo e status desse novo erro.
+- Nenhuma correcao, dependencia, deploy, push ou alteracao de arquitetura foi realizada nesta fase.
+
+### Arquivos alterados
+
+- `RELATORIO_CODEX.md`: registro deste diagnostico.
+
+### Alteracoes realizadas
+
+- Nenhum codigo ou configuracao foi alterado.
+- Foram consultados somente o repositorio, o deployment Preview e a documentacao oficial vigente da Vercel.
+
+### Testes executados
+
+- Busca local por `DEL1001.pdf` e por outros arquivos PDF: nenhum PDF disponivel no workspace.
+- Consulta dos Runtime Logs do deployment `dpl_CubmnDr9C2fZpAJRUTc5EzaQzMtb` nas ultimas 24 horas, filtrada por HTTP 500.
+- Revisao do fluxo multipart, limites, validacao de assinatura, parser, tratamento de excecao e empacotamento de canvas.
+- Revisao dos limites oficiais de payload, memoria, bundle e duracao das Vercel Functions.
+
+### Resultados
+
+- O Runtime Log registra uma unica falha real em `04/09/2026 15:04:34` no horario local: Function serverless, `POST /api/materials/extract`, HTTP 500, branch `piloto-vercel` e mensagem `[API Error]: { name: 'Error', code: 'UNKNOWN', status: undefined }`.
+- Um excesso no limite Multer de 3 MiB produziria `MulterError`, log `Upload Rejected` e HTTP 413; isso nao ocorreu.
+- Um tipo, MIME ou assinatura PDF invalida produziria `PublicRequestError` e HTTP 415; isso nao ocorreu.
+- O payload informado, aproximadamente 1,98 MiB antes do overhead multipart, esta abaixo do limite do aplicativo de 3 MiB e do limite oficial de 4,5 MB por request/response da Vercel. O tamanho exato recebido nao e registrado atualmente.
+- Como `multer.memoryStorage()` entrega `req.file.buffer` apenas depois de consumir o multipart, e a execucao alcancou o caminho que transforma falhas do parser em `Error`, ha evidencia de que o arquivo chegou integralmente a Function e foi entregue ao parser.
+- A resposta foi HTTP 500 da aplicacao, nao 413 da plataforma, 504 `FUNCTION_INVOCATION_TIMEOUT` ou encerramento por falta de memoria. Timeout e limite de payload nao correspondem ao sintoma observado.
+- `@napi-rs/canvas` esta incluido no bundle; a Function inicializou e os logs desta falha nao mostram `DOMMatrix`, modulo ausente ou process exit. A correcao anterior de empacotamento nao regrediu.
+- A memoria efetivamente usada, a duracao exata e a excecao original nao aparecem na saida da CLI consultada. A Vercel disponibiliza esses metadados no detalhe da invocacao no painel de Runtime Logs, quando acessiveis no plano.
+
+### Problemas encontrados
+
+- `parsePdfBuffer` remove completamente nome, codigo e causa da excecao original. Isso protege detalhes internos na resposta publica, mas impede determinar pelos logs se este PDF falhou por estrutura, recurso grafico, fonte, criptografia, corrupcao ou limitacao especifica do `pdfjs-dist`.
+- Sem o arquivo `DEL1001.pdf`, nao foi possivel reproduzir localmente nem comparar seu comportamento com outro PDF real de tamanho semelhante.
+- Portanto, esta comprovado que a falha ocorre dentro do parser, mas nao esta comprovada a causa interna final nem se ela e exclusiva deste documento ou de uma classe de PDFs semelhantes.
+
+### Estado atual
+
+- A aplicacao continua aceitando texto e as rotas serverless continuam operacionais no Preview.
+- O caminho PDF real possui uma falha reproduzida pelo usuario e localizada na etapa `PDFParse.getText()`/tratamento do parser.
+- `main`, Production, dependencias e configuracoes Vercel nao foram alteradas nesta investigacao.
+
+### Pendencias
+
+- Disponibilizar o mesmo `DEL1001.pdf` no workspace, sem dados pessoais ou sigilosos, para reproducao controlada local.
+- Executar o parser diretamente sobre o arquivo e capturar localmente tipo, codigo e cadeia de causa da excecao, sem registrar conteudo do documento.
+- Se a reproducao local divergir, consultar no painel Vercel os metadados da invocacao das 15:04:34, especialmente duracao e pico de memoria.
+
+### Proximos passos recomendados
+
+- Na proxima tarefa, reproduzir com o mesmo arquivo e adicionar, somente se ainda necessario, diagnostico sanitizado temporario no `catch` de `parsePdfBuffer` que preserve `name`, `code` e categoria da causa sem expor texto, stack ou dados do PDF; somente depois definir a correcao funcional.
+
+## Reproducao local com o PDF DEL1001 (04/09/2026)
+
+### Resumo
+
+- O arquivo exato usado pelo usuario foi localizado em `C:\Users\Silveira\Downloads\DEL1001.pdf`, fora do repositorio, com 2.074.318 bytes.
+- O arquivo nao esta rastreado pelo Git, nao foi alterado, copiado, versionado nem enviado a servico externo nesta tarefa.
+- A chamada direta da mesma biblioteca `pdf-parse` 2.4.5, classe `PDFParse` e metodo `getText()` concluiu localmente sem excecao.
+- A falha do Preview nao foi reproduzida no Windows local; a diferenca esta associada ao ambiente de execucao serverless ou a uma condicao transitoria nele, mas o subtipo exato continua oculto pelo tratamento atual.
+
+### Arquivos alterados
+
+- `RELATORIO_CODEX.md`: registro dos resultados; nenhum codigo foi alterado.
+
+### Alteracoes realizadas
+
+- Nenhuma instrumentacao, correcao funcional, dependencia, configuracao, deploy, push ou commit foi realizado.
+
+### Testes executados
+
+- Confirmacao de caminho, tamanho e ausencia do arquivo no indice Git.
+- Execucao direta de `PDFParse.getText()` sobre o arquivo exato, sem imprimir o texto extraido ou conteudo de paginas.
+- Levantamento local apenas de tamanho, versao PDF, paginas, contagens, tempo, memoria e marcadores estruturais.
+- Estimativa do tamanho da resposta JSON que a rota produziria, sem registrar seu campo de texto.
+- Tentativa de executar `parsePdfBuffer` via `tsx`; o runner falhou antes de carregar o modulo pelo erro ambiental preexistente `uv_os_get_passwd returned ENOMEM`.
+- Busca por PDF pequeno no workspace e nas dependencias: nenhum candidato disponivel para comparacao nesta tarefa.
+
+### Resultados
+
+- `PDFParse.getText()` passou em 961 ms: 86 paginas, 221.549 caracteres e 36.756 palavras.
+- RSS observado: 57,4 MiB antes da leitura, 59,8 MiB apos leitura, 61,7 MiB apos construcao do parser e 100,1 MiB apos extracao; heap usado ao final 23,9 MiB e memoria externa 10,7 MiB.
+- A resposta JSON estimada tem 235.449 bytes, muito abaixo do limite de resposta e do limite interno de 500.000 caracteres.
+- Perfil estrutural sanitizado: PDF 1.4, nao criptografado, XRef classico, sem XRef stream, object stream, linearizacao, AcroForm ou XFA; foram detectados 12 objetos de fonte, 2 de imagem e 101 filtros Flate.
+- O sucesso local exclui arquivo globalmente ilegivel, criptografia impeditiva, corrupcao basica de XRef e incompatibilidade geral da biblioteca com o documento.
+- O consumo e o tempo locais nao sustentam falta de memoria ou timeout como causa. O HTTP 500 do Preview, em vez de 413 ou 504, tambem nao corresponde a esses limites.
+- Como o mesmo documento passa localmente e falha somente na Function, a causa mais provavel e uma incompatibilidade ou falha transitoria do `pdfjs-dist`/recursos nativos no runtime Linux serverless acionada durante esse documento. Nao ha evidencia suficiente para atribui-la especificamente a canvas, fontes, imagens ou uma pagina.
+
+### Problemas encontrados
+
+- A excecao original do Preview continua irrecuperavel: `parsePdfBuffer` substitui integralmente o erro antes do log global.
+- A falha ambiental do `tsx` impede usar diretamente o wrapper TypeScript nesta maquina, embora a biblioteca e o metodo efetivamente usados tenham sido exercitados com sucesso via Node.
+- Sem uma nova execucao serverless com diagnostico sanitizado, nao e possivel distinguir incompatibilidade deterministica do runtime de falha transitoria.
+
+### Estado atual
+
+- A biblioteca atual permanece adequada de forma provisoria: processa o arquivo exato localmente, mas ainda nao oferece diagnostico suficiente nem confiabilidade comprovada para esta classe de PDF no Preview.
+- `DEL1001.pdf` permanece somente em Downloads e fora do Git.
+- `main`, Production, dependencias, codigo e configuracao Vercel permanecem inalterados.
+
+### Pendencias
+
+- Adicionar em tarefa separada instrumentacao sanitizada minima no `catch` de `parsePdfBuffer`, preservando apenas etapa, `name`, `code`, `cause.name`, `cause.code` e mensagem tecnica revisada, sem stack ou conteudo.
+- Repetir uma unica vez o upload do mesmo arquivo no Preview instrumentado e remover ou reduzir a instrumentacao depois de identificar a excecao.
+
+### Proximos passos recomendados
+
+- Implementar primeiro a instrumentacao sanitizada em `server/parsers.ts`; nao trocar biblioteca nem criar fallback antes de capturar a excecao real no runtime serverless.
+
+## Instrumentacao sanitizada do parser PDF (04/09/2026)
+
+### Resumo
+
+- Preparada instrumentacao minima no tratamento de erro de `parsePdfBuffer` para diagnosticar uma unica reproducao de `DEL1001.pdf` no Preview.
+
+### Arquivos alterados
+
+- `server/parsers.ts`: diagnostico sanitizado da excecao original.
+- `RELATORIO_CODEX.md`: registro da instrumentacao e das validacoes.
+
+### Alteracoes realizadas
+
+- O log do parser preserva somente a etapa fixa `PDFParse.getText`, `name`, `code`, `causeName` e `causeCode` quando disponiveis.
+- Mensagem, stack, buffer, texto, paginas, caminhos, variaveis de ambiente e demais dados foram deliberadamente omitidos.
+- A resposta publica generica permanece inalterada; nenhuma biblioteca, dependencia, arquitetura ou fallback foi modificado.
+
+### Testes executados
+
+- Pendentes nesta entrada: TypeScript, build, `git diff --check`, parser local, Preview automatico e uma unica reproducao remota controlada.
+
+### Resultados
+
+- A instrumentacao esta limitada ao caminho de erro do parser PDF e nao altera o caminho de sucesso.
+
+### Problemas encontrados
+
+- Nenhum problema adicional identificado antes da validacao.
+
+### Estado atual
+
+- Alteracao preparada na branch `piloto-vercel`, ainda sem commit ou deploy nesta entrada.
+
+### Pendencias
+
+- Validar localmente, consolidar, enviar a branch, aguardar o Preview e executar uma unica reproducao com o arquivo exato.
+
+### Proximos passos recomendados
+
+- Capturar a excecao sanitizada no Preview e, sem implementar correcao funcional, definir a causa e a proxima alteracao minima.

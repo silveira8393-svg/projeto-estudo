@@ -28,7 +28,15 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ExtractedDocument>
       pageCount: result?.total || result?.pages?.length || undefined,
       wordCount,
     };
-  } catch {
+  } catch (error) {
+    const candidate = error as { name?: unknown; code?: unknown; cause?: { name?: unknown; code?: unknown } };
+    console.error('[PDF Parser Error]:', {
+      stage: 'PDFParse.getText',
+      name: String(candidate?.name || 'Error'),
+      code: candidate?.code == null ? undefined : String(candidate.code),
+      causeName: candidate?.cause?.name == null ? undefined : String(candidate.cause.name),
+      causeCode: candidate?.cause?.code == null ? undefined : String(candidate.cause.code),
+    });
     throw new Error('Falha ao ler o arquivo PDF. O documento pode estar invalido ou protegido.');
   }
 }
