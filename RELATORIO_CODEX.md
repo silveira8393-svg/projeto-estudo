@@ -961,3 +961,39 @@ Os arquivos de teste foram construidos em memoria e nao foram adicionados ao rep
 - Permanecem validos os testes registrados anteriormente: TypeScript, build Vite/Node, servidor de producao local, rotas e limites da API, uploads TXT/DOCX/PDF, erros controlados, rate limit local e `vercel dev` com frontend Vite, Function Express e fallback SPA.
 - Nenhum deploy ou push foi realizado nesta consolidacao.
 - Proximo passo: configurar as variaveis de ambiente apenas no Preview e gerar um Preview real para validacao controlada.
+
+## Primeiro Preview real na Vercel (04/09/2026)
+
+### Resultado
+
+- Commit de partida: `74b0b71` (`feat: preparar integracao local com a Vercel`).
+- A branch `piloto-vercel` foi enviada para `origin/piloto-vercel`; `main` nao foi alterada.
+- Foram configuradas exclusivamente em Preview, como Secret, as variaveis `GEMINI_API_KEY` e `AI_MODEL`. Nenhum valor foi registrado.
+- Preview final: `https://projeto-estudo-6if4grjz9-silveira8393-svgs-projects.vercel.app`.
+- Deployment `dpl_FgmFzEqkFePDL4gWgRWYVy4GE9ZP`: target `preview`, status `Ready`, Function `api/index` com 14,06 MB na regiao `iad1`.
+- Production nao foi configurada, promovida ou alterada; nenhum dominio personalizado, merge ou rate limiting definitivo foi criado.
+
+### Testes executados
+
+- `GET /`: `200 text/html`.
+- Asset JavaScript compilado: `200 application/javascript`.
+- Fallback SPA em `/preview-fallback-check`: `200 text/html`.
+- `GET /api/health`: `200 application/json`, confirmando a execucao da Function.
+- API inexistente: `404 application/json` controlado.
+- `POST /api/materials/extract` com texto minimo seguro: `200 application/json`, 13 palavras.
+- `POST /api/ai/structure` com carga minima: `200 application/json` em aproximadamente 19,9 segundos.
+- `POST /api/ai/generate` com um topico e um flashcard: `200 application/json` em aproximadamente 21,6 segundos; quantidade e schema esperados.
+- Runtime Logs consultados: chamadas finais registradas sem conteudo do material e sem valores de ambiente. Erros `500` e `504` nao foram provocados deliberadamente no Preview final.
+- O Preview possui Deployment Protection; acesso automatizado de validacao foi realizado com bypass autenticado da Vercel CLI.
+
+### Problemas e correcao
+
+- O primeiro deployment (`dpl_H2rLAzFbMoXU5icA2nE7DaQvTMi1`) concluiu o build, mas a Function falhava no cold start com `FUNCTION_INVOCATION_FAILED`: `pdfjs-dist` nao encontrava `@napi-rs/canvas` e `DOMMatrix` ficava indefinido.
+- Correcao minima em `vercel.json`: inclusao explicita de `node_modules/@napi-rs/canvas*/**` no bundle da Function, sem adicionar ou atualizar dependencias.
+- A correcao passou em `npm run lint`, `npm run build` e `git diff --check`; o segundo Preview iniciou a Function e passou nos testes.
+- Duas tentativas iniciais de extracao receberam JSON malformado por escape da linha de comando de teste e retornaram `500` controlado. O payload foi reenviado corretamente por stdin e passou; nenhuma correcao da aplicacao foi necessaria para esse caso.
+
+### Pendencias e proximo passo
+
+- A correcao de empacotamento e este registro permanecem locais e devem ser revisados, consolidados em commit e enviados para `piloto-vercel` antes de qualquer nova etapa.
+- Proximo passo recomendado: consolidar e enviar esses dois arquivos na branch de piloto e confirmar que um Preview criado a partir do Git reproduz o resultado, sem promover para Production.
