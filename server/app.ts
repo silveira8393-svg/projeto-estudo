@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
-import { extractStructureFromText, generateActivities, getAIErrorDiagnostics, mapAIErrorToHttp } from './ai.js';
+import { extractStructureFromText, generateActivities, logUnobservedAIError, mapAIErrorToHttp } from './ai.js';
 import { parseDocxBuffer, parsePdfBuffer, parsePlainText } from './parsers.js';
 
 export const PILOT_LIMITS = {
@@ -139,7 +139,7 @@ export function createApp() {
       res.json({ success: true, ...result });
     } catch (error) {
       if (error instanceof PublicRequestError) return res.status(error.status).json({ success: false, error: error.message, code: error.code });
-      console.error('[Structure Error]:', getAIErrorDiagnostics(error));
+      logUnobservedAIError(error, 'structure');
       const publicError = mapAIErrorToHttp(error);
       res.status(publicError.status).json({ success: false, error: publicError.message, code: publicError.code });
     }
@@ -169,7 +169,7 @@ export function createApp() {
       res.json({ success: true, ...result });
     } catch (error) {
       if (error instanceof PublicRequestError) return res.status(error.status).json({ success: false, error: error.message, code: error.code });
-      console.error('[Generate Activities Error]:', getAIErrorDiagnostics(error));
+      logUnobservedAIError(error, 'generate');
       const publicError = mapAIErrorToHttp(error);
       res.status(publicError.status).json({ success: false, error: publicError.message, code: publicError.code });
     }

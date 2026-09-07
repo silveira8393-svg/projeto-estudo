@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { GoogleGenAI, Type } from '@google/genai';
+import { AITelemetry, type AIAttemptTelemetry, hasAIErrorTelemetry, safeAIErrorDetails } from './ai-telemetry.js';
 import { MaterialTopic, Flashcard, MultipleChoiceQuestion, TrueFalseQuestion, ActivityGenerationResult, StudyMode, StudyDifficulty } from '../src/types.js';
 
 // Centralized AI configuration with dynamic defaults (no hardcoded quota/RPM assumptions)
@@ -56,7 +57,7 @@ export interface AIHttpErrorResponse {
 
 /**
  * Converte erros tecnicos do SDK em respostas publicas estaveis.
- * O erro original deve permanecer apenas no log do servidor.
+ * A telemetria registra somente campos tecnicos permitidos, nunca o erro original.
  */
 export function mapAIErrorToHttp(error: any): AIHttpErrorResponse {
   if (error instanceof AIRequestTimeoutError || String(error?.code || '').toUpperCase() === 'AI_REQUEST_TIMEOUT') {
@@ -103,23 +104,15 @@ export function mapAIErrorToHttp(error: any): AIHttpErrorResponse {
   };
 }
 
-function redactSensitiveTechnicalText(value: unknown): string | undefined {
-  if (!value) return undefined;
-  let redacted = String(value);
-  const configuredApiKey = process.env.GEMINI_API_KEY;
-  if (configuredApiKey) redacted = redacted.split(configuredApiKey).join('[REDACTED]');
-  return redacted
-    .replace(/([?&](?:key|api_key)=)[^&\s]+/gi, '$1[REDACTED]')
-    .replace(/("?(?:apiKey|api_key)"?\s*[:=]\s*["'])[^"']+/gi, '$1[REDACTED]');
+export function getAIErrorDiagnostics(error: any) {
+  return safeAIErrorDetails(error);
 }
 
-export function getAIErrorDiagnostics(error: any) {
-  return {
-    name: String(error?.name || 'Error'),
-    status: getErrorStatus(error),
-    code: String(error?.code || error?.status || 'UNKNOWN'),
-    message: process.env.NODE_ENV === 'development' ? redactSensitiveTechnicalText(error?.message) : undefined,
-  };
+// Route fallback for failures before the instrumented provider attempts (e.g. client setup).
+export function logUnobservedAIError(error: unknown, operation: 'structure' | 'generate') {
+  if (hasAIErrorTelemetry(error)) return;
+  new AITelemetry(operation, { inputChars: 0, inputBytes: 0 })
+    .startAttempt(0, 'initialization').failed(error, mapAIErrorToHttp(error).status);
 }
 
 function isAttemptTimeout(error: any): boolean {
@@ -178,23 +171,29 @@ async function executeAttemptWithTimeout<T>(
 
 // Retries only explicit transient HTTP statuses and temporary network failures.
 export async function executeWithRetry<T>(
-  operation: (signal: AbortSignal) => Promise<T>,
+  operation: (signal: AbortSignal, telemetry?: AIAttemptTelemetry) => Promise<T>,
   attempts = AI_CONFIG.getMaxAttempts(),
+  telemetry?: AITelemetry,
 ): Promise<T> {
   const maxAttempts = Math.max(1, attempts);
   const timeoutMs = AI_CONFIG.getRequestTimeoutMs();
   let lastError: any = null;
   for (let i = 0; i < maxAttempts; i++) {
+    const attemptTelemetry = telemetry?.startAttempt(i + 1);
     try {
-      return await executeAttemptWithTimeout(operation, timeoutMs);
+      const result = await executeAttemptWithTimeout((signal) => operation(signal, attemptTelemetry), timeoutMs);
+      attemptTelemetry?.completed();
+      return result;
     } catch (error: any) {
       lastError = error;
       if (isRetryableError(error) && i < maxAttempts - 1) {
         const delay = AI_CONFIG.getInitialBackoffMs() * Math.pow(2, i) + Math.random() * 400;
-        console.warn(`[AI Engine] Erro transitório. Nova tentativa ${i + 2}/${maxAttempts} em ${Math.round(delay)}ms.`);
+        if (attemptTelemetry) attemptTelemetry.failed(error, undefined, Math.round(delay));
+        else console.warn(`[AI Engine] Erro transitório. Nova tentativa ${i + 2}/${maxAttempts} em ${Math.round(delay)}ms.`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
+      attemptTelemetry?.failed(error, mapAIErrorToHttp(error).status);
       throw error;
     }
   }
@@ -227,10 +226,15 @@ Regras:
    - excerptContent: um trecho literal ou síntese direta do conteúdo correspondente a esse tópico (para ser usado como base de estudo posterior)
 4. Mantenha os nomes e conceitos originais usados pelo autor.`;
 
-  return await executeWithRetry(async (abortSignal) => {
+  const promptContent = `Título do Material: "${materialTitle}"\n\nTexto do Material:\n${textSample}`;
+  const telemetry = new AITelemetry('structure', {
+    inputChars: promptContent.length,
+    inputBytes: Buffer.byteLength(promptContent, 'utf8'),
+  });
+  return await executeWithRetry(async (abortSignal, attemptTelemetry) => {
     const response = await ai.models.generateContent({
       model,
-      contents: `Título do Material: "${materialTitle}"\n\nTexto do Material:\n${textSample}`,
+      contents: promptContent,
       config: {
         abortSignal,
         httpOptions: { timeout: AI_CONFIG.getRequestTimeoutMs() },
@@ -267,7 +271,12 @@ Regras:
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
+    attemptTelemetry?.setStage('response_received');
+    const responseText = response.text;
+    attemptTelemetry?.responseReceived(response, typeof responseText === 'string' ? responseText.length : undefined);
+    attemptTelemetry?.setStage('json_parse');
+    const parsed = JSON.parse(responseText || '{}');
+    attemptTelemetry?.setStage('normalize');
     const topics: MaterialTopic[] = (parsed.topics || []).map((t: any, index: number) => ({
       id: `topic-${index + 1}-${Date.now().toString(36)}`,
       title: t.title || `Tópico ${index + 1}`,
@@ -282,7 +291,7 @@ Regras:
       title: parsed.identifiedTitle || materialTitle,
       topics,
     };
-  });
+  }, undefined, telemetry);
 }
 
 /**
@@ -358,7 +367,16 @@ QUANTIDADES SOLICITADAS:
 
 Gere exatamente as quantidades solicitadas acima em conformidade com o schema JSON.`;
 
-  return await executeWithRetry(async (abortSignal) => {
+  const telemetry = new AITelemetry('generate', {
+    inputChars: promptContent.length,
+    inputBytes: Buffer.byteLength(promptContent, 'utf8'),
+    topicCount: selectedTopics.length,
+    flashcardsRequested: flashcardCount,
+    multipleChoiceRequested: multipleChoiceCount,
+    trueFalseRequested: trueFalseCount,
+    totalActivitiesRequested: flashcardCount + multipleChoiceCount + trueFalseCount,
+  });
+  return await executeWithRetry(async (abortSignal, attemptTelemetry) => {
     const response = await ai.models.generateContent({
       model,
       contents: promptContent,
@@ -431,7 +449,12 @@ Gere exatamente as quantidades solicitadas acima em conformidade com o schema JS
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
+    attemptTelemetry?.setStage('response_received');
+    const responseText = response.text;
+    attemptTelemetry?.responseReceived(response, typeof responseText === 'string' ? responseText.length : undefined);
+    attemptTelemetry?.setStage('json_parse');
+    const parsed = JSON.parse(responseText || '{}');
+    attemptTelemetry?.setStage('normalize');
 
     // Validação e normalização de IDs
     const flashcards: Flashcard[] = (parsed.flashcards || []).map((f: any, i: number) => ({
@@ -475,5 +498,5 @@ Gere exatamente as quantidades solicitadas acima em conformidade com o schema JS
       trueFalseQuestions,
       warnings: parsed.warnings || [],
     };
-  });
+  }, undefined, telemetry);
 }

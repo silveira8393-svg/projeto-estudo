@@ -1565,3 +1565,366 @@ Os arquivos de teste foram construidos em memoria e nao foram adicionados ao rep
 ### Proximos passos recomendados
 
 - Concluir a validacao desta limpeza antes de considerar o marco estabilizado e iniciar qualquer fase de persistencia.
+
+## Validacao final da limpeza do parser PDF (04/09/2026)
+
+### Resumo
+
+- A limpeza foi consolidada no commit `1e929c0` (`chore: remover diagnostico temporario do parser PDF`) e enviada somente para `piloto-vercel`.
+- A integracao Git criou o Preview `https://projeto-estudo-plq6pbc12-silveira8393-svgs-projects.vercel.app`, deployment `dpl_Fkd5NZftscMTcob65c8Q5AAC2Q8g`, target `preview`, status `Ready`.
+- O marco atual ficou estabilizado e validado antes de qualquer trabalho de banco de dados ou persistencia.
+
+### Arquivos alterados
+
+- `server/parsers.ts`: classificador temporario removido e log operacional minimo preservado no commit.
+- `RELATORIO_CODEX.md`: historico pendente consolidado no commit e este resultado final mantido localmente.
+
+### Alteracoes realizadas
+
+- Foram removidos a leitura interna da mensagem, os padroes e as categorias temporarias de diagnostico.
+- Foram preservados o log sanitizado da etapa, a resposta publica generica, o fluxo do parser e o empacotamento do worker e canvas.
+- Nenhuma dependencia, UX, arquitetura, banco de dados, autenticacao ou persistencia foi alterada.
+
+### Testes executados
+
+- `npm run lint`, `npm run build` e `git diff --check`: passaram.
+- Teste local de `DEL1001.pdf`: passou com 86 paginas, 36.756 palavras e 221.547 caracteres, sem imprimir conteudo.
+- `GET /api/health` no Preview: passou.
+- Upload unico de `DEL1001.pdf` no Preview: passou sem exibir ou persistir seu texto.
+- Runtime Logs consultados imediatamente apos os testes.
+
+### Resultados
+
+- Health e extracao retornaram HTTP 200 no Runtime Log.
+- O PDF retornou 86 paginas, 36.756 palavras e 221.547 caracteres.
+- Nao houve erro de parser, worker, canvas, `DOMMatrix`, resolucao de modulo ou HTTP 500.
+- O comportamento funcional permaneceu inalterado apos a remocao do diagnostico temporario.
+
+### Problemas encontrados
+
+- A primeira contagem local de palavras ficou incorreta apenas no comando de diagnostico por escape duplo da expressao regular; a contagem foi recalculada sem alterar codigo ou arquivo e confirmou 36.756 palavras.
+- Nenhum problema funcional foi encontrado.
+
+### Estado atual
+
+- `piloto-vercel` e `origin/piloto-vercel` contem `1e929c0`.
+- `main` permanece em `3435fd5` e Production nao foi alterada nesta tarefa.
+- O Preview esta `Ready` e validado; este resultado final permanece como alteracao local para evitar outro deployment automatico.
+- O marco de estabilizacao do fluxo principal pode ser considerado fechado.
+
+### Pendencias
+
+- Consolidar este registro documental quando apropriado, considerando o acionamento automatico de Preview por push.
+- Definir separadamente o escopo e os requisitos da proxima fase antes de implementar persistencia.
+
+### Proximos passos recomendados
+
+- Planejar em tarefa separada a proxima fase de dados e persistencia, sem inicia-la automaticamente.
+
+## Diagnostico da geracao combinada de atividades por IA (07/09/2026)
+
+### Resumo
+
+- Objetivo: investigar por que modalidades isoladas funcionam e a combinacao falha, sem implementar correcao ou instrumentacao.
+- Confirmado nos Runtime Logs de Production: falhas de `/api/ai/generate` com `ApiError`, status upstream 503 e 504. O backend preserva 503 e converte o 504 upstream em HTTP 500 generico.
+- As falhas registradas ocorreram na chamada ao provedor, antes do parsing/normalizacao das atividades. Nao foi comprovado que a combinacao das modalidades seja a causa dos erros upstream.
+- O pedido anexado prevaleceu sobre `TAREFA_ATUAL.md`, que ainda descreve uma validacao anterior. O problema de extracao PDF nao foi tratado como causa desta falha de geracao.
+
+### Arquivos alterados
+
+- Somente `RELATORIO_CODEX.md`, por acrescimo ao final. Preservados os 55 acrescimos locais preexistentes e todo o conteudo anterior (1.622 linhas).
+- Estado inicial: branch `piloto-vercel`, HEAD `1e929c0`; somente o relatorio modificado. Nenhum commit, push ou deploy realizado.
+
+### Alteracoes realizadas
+
+- Apenas documentacao do diagnostico. Nenhuma alteracao de codigo, frontend, UX, prompt, modelo, dependencias, ambiente, Vercel, Supabase ou persistencia.
+- Inspecionados: `GUIA_CODEX.md`, relatorio completo, `TAREFA_ATUAL.md`, `src/App.tsx`, `src/components/SessionConfigView.tsx`, `src/lib/api.ts`, `src/types.ts`, `server/ai.ts`, `server/app.ts`, `server.ts`, `api/index.ts`, `vercel.json`, `package.json`, resolucao do SDK no `package-lock.json` e trechos do SDK instalado `node_modules/@google/genai/dist/node/index.mjs`.
+- Comparacao Git entre `d45aaa3` (Production registrada) e HEAD: sem diferencas em IA, rota, App, cliente HTTP, handler e configuracao Vercel. Os logs consultados confirmaram o deployment Production `dpl_CTQvK1GzKZwHWv7MvDRkvagswm8A`.
+
+### Fluxo exato e pontos de controle
+
+1. `src/App.tsx:42`: estado React de modo, dificuldade e contagens; defaults 3/2/2. `SessionConfigView` recebe valores/setters e altera cada quantidade independentemente; o botao chama `onGenerate`. A interface permite incrementos acima dos tetos do backend.
+2. `src/App.tsx:177`: `handleGenerateActivities` filtra os topicos selecionados e monta `combinedContent` com titulo e `excerptContent || summary` de cada um. Se o resultado tiver menos de 50 caracteres ou estiver vazio, usa o `rawText` inteiro. Um topico selecionado nao significa automaticamente enviar o documento inteiro.
+3. As aproximadamente 57.043 palavras e os cinco topicos sao dados informados pelo usuario, nao tamanhos medidos do request. A estruturacao anterior amostra ate 50.000 caracteres e produz trechos/sinteses; nao divide necessariamente todo o documento em cinco parcelas equivalentes. O tamanho real do topico desta falha nao esta nos logs.
+4. `src/App.tsx:206`: envia um unico POST JSON a `/api/ai/generate`, contendo titulo, conteudo, titulos/resumos selecionados, modo, dificuldade e as tres contagens.
+5. `vercel.json` reescreve `/api/*` para `/api/index`; `api/index.ts` exporta `createApp()`. `server.ts` usa o mesmo app para execucao local.
+6. `server/app.ts:148`: rate limit de 10 requests por IP/janela de 10 minutos por instancia; valida texto, titulo, modo, dificuldade, topicos e contagens. `combinedContent` aceita ate 100.000 caracteres; JSON ate 2 MB; ate 8 topicos, titulo 200 e resumo 2.000 caracteres; cada modalidade ate 10 e soma ate 20. O pedido 5/3/2 passa nos limites de contagem.
+7. `server/app.ts:157`: `parseActivityCount` converte com `Number`, exige inteiro entre zero e dez; `counts` e `safeTopics` chegam a `generateActivities` em `server/ai.ts:291`. Todas as contagens zero retornam listas vazias sem Gemini.
+8. O system instruction define fidelidade, dificuldade e qualidade de todas as modalidades, mesmo quando alguma quantidade e zero. Temperatura definida pelo codigo: 0,15 no modo fiel e 0,35 no complementar. O prompt inclui titulo, titulos dos topicos, conteudo e tres linhas de quantidades. Os resumos enviados separadamente nao sao interpolados, salvo quando ja usados no conteudo pelo frontend.
+9. `server/ai.ts:361`: uma chamada `ai.models.generateContent` por tentativa, compartilhada pelas tres modalidades, com JSON e `responseSchema` fixo. Nao ha chamada por modalidade, lote, merge de respostas externas ou tratamento especial ativado pela combinacao.
+10. `server/ai.ts:371`: schema com arrays `flashcards`, `multipleChoiceQuestions`, `trueFalseQuestions` e `warnings`. Itens exigem campos de pergunta/resposta/referencia; multipla escolha tem opcoes e enum A-D; V/F exige booleano. Nao ha `required` no objeto raiz, `minItems/maxItems` para contagens ou garantia de quatro alternativas no schema; quatro opcoes e quantidades exatas sao instrucoes textuais.
+11. `executeWithRetry` engloba chamada, leitura de texto, parsing e normalizacao. Defaults do codigo: 45 s por tentativa, duas tentativas, backoff inicial 1 s com jitter de ate 400 ms. Retry para HTTP 429/500/502/503/504 e certos erros de rede; timeout local nao recebe retry. O ultimo erro determina a resposta publica. O SDK instalado nao repete internamente sem `retryOptions`, ausente nesta chamada.
+12. `server/ai.ts:434`: `JSON.parse(response.text || '{}')`. Nao ha validador runtime de schema. O getter `text` do SDK concatena partes textuais nao marcadas como pensamento do primeiro candidato; a aplicacao ignora `finishReason`, `promptFeedback` e `usageMetadata`.
+13. `server/ai.ts:437`, `:445` e `:464`: tres mapas independentes geram IDs e preenchem defaults. Listas ausentes viram vazias; valor truthy que nao seja array ou item nulo pode lancar `TypeError`. Multipla escolha verifica se `options` e array; V/F usa `true` se o gabarito nao for booleano. Nao confere contagens, fidelidade ou consistencia do gabarito. Texto ausente pode ser aceito como sucesso com listas vazias.
+14. Sucesso devolve `{ success: true, ...result }`. Qualquer excecao de IA/parsing/normalizacao chega ao mesmo catch de `server/app.ts:170`, loga diagnostico reduzido e chama `mapAIErrorToHttp`.
+15. `src/lib/api.ts`: `safeFetchJson` verifica rede, Content-Type, parsing HTTP e `response.ok`. Em erro HTTP JSON, lanca `Error(data.error)`. O frontend nao escolhe entre as duas mensagens por modalidade nem pelo campo `code`: mostra o texto do backend em `generationError` (`src/App.tsx:237` e `:345`). `finally` encerra loading e temporizador. Nao ha timeout proprio no fetch do frontend.
+
+### Mapeamento HTTP confirmado
+
+| Condicao | HTTP / codigo publico | Implicacao |
+| --- | --- | --- |
+| Timeout local ou codigo `AI_REQUEST_TIMEOUT` | 504 / `AI_REQUEST_TIMEOUT` | Mensagem de processamento demorado |
+| Upstream 429 ou texto tecnico `RESOURCE_EXHAUSTED` | 429 / `AI_RATE_LIMIT` | Limite temporario da IA |
+| Upstream 503 ou texto tecnico `UNAVAILABLE` | 503 / `AI_UNAVAILABLE` | Mensagem de servico temporariamente indisponivel |
+| Upstream 401/403 ou marcadores de autenticacao/permissao | 500 / `AI_CONFIGURATION_ERROR` | Mensagem de configuracao |
+| Demais erros, inclusive upstream 400/500/502/504, `SyntaxError` e `TypeError` comuns | 500 / `AI_PROCESSING_ERROR` | Mensagem de impossibilidade de concluir processamento |
+| Validacao de parametros ou total acima de 20 | 400 / codigo especifico | Antes da chamada Gemini |
+| Conteudo acima do teto / JSON acima de 2 MB | 413 / `TEXT_TOO_LARGE` ou `REQUEST_TOO_LARGE` | Antes da chamada Gemini |
+| Rate limit local | 429 / `RATE_LIMITED` | Antes da chamada Gemini |
+
+- A ordem das classificacoes importa: timeout local, quota, indisponibilidade, configuracao, fallback. O 503 pode ser inferido por texto mesmo sem status upstream 503; contudo, nos registros desta investigacao, o status upstream 503 esta explicitamente presente.
+- O middleware global pode retornar 500 `INTERNAL_ERROR` para erros anteriores ao handler, inclusive JSON de entrada malformado. Esse texto e diferente das duas mensagens investigadas.
+- Portanto, o HTTP publico e emitido pelo backend; nas falhas 503 observadas nos logs, ele preserva um 503 efetivamente recebido pela camada SDK/provedor. Nos erros 504 upstream, o backend altera o status para 500.
+
+### Testes executados
+
+| Teste | Resultado |
+| --- | --- |
+| Testes manuais informados pelo usuario: 1 FC, 4 MC, 10 VF e combinacao | Considerados como evidencia relatada; nao repetidos com material real |
+| A: resposta sintetica para 1/0/0 | Passou; contagens preservadas |
+| B: resposta sintetica para 0/4/0 | Passou; contagens preservadas |
+| C: resposta sintetica para 0/0/10 | Passou; contagens preservadas |
+| D: resposta sintetica para 5/3/2 | Passou; contagens preservadas e tres modalidades coexistindo |
+| Comparacao dos requests A-D | Mesmo schema e mesmas instrucoes de sistema; prompt de conteudo com 377/377/378/377 caracteres no fixture. Combinacao nao aumenta substancialmente a entrada; altera trabalho/saida solicitados |
+| JSON incompleto, array substituido por objeto e item nulo | `SyntaxError` ou `TypeError`, mapeados a 500 `AI_PROCESSING_ERROR`, uma tentativa, sem retry |
+| Texto de resposta vazio | Retorno aceito com listas vazias, confirmando lacuna de validacao |
+| Mapeamento de upstream 503, marcador UNAVAILABLE sem status, 429, 504, 400, 401 e timeout local | Passou; confirmado especialmente upstream 504 -> HTTP 500 e timeout local -> HTTP 504 |
+| `npm run lint` | Passou (`tsc --noEmit`) |
+| `npm run build` | Passou; Vite e bundle Node gerados em `dist`, ignorado pelo Git |
+| `git diff --check` | Passou antes e depois do acrescimo documental; somente aviso de conversao LF/CRLF |
+| Runtime Logs de Production, janela de tres dias, ate 100 registros | Acesso concluido por Vercel CLI 59.10.0; somente metadados/categorias permitidas exibidos |
+
+- Testes sinteticos transpilaram o `server/ai.ts` atual em memoria e executaram suas funcoes com SDK substituido por respostas controladas. Nenhum arquivo de teste foi criado; nao validam a qualidade da geracao real nem simulam carga do provedor. Nao foram testes HTTP ponta a ponta ou automacao visual.
+- Nenhuma chamada nova ao Gemini foi feita por este diagnostico. Os logs reais ja localizaram a etapa da falha; reproducoes adicionais consumiriam recursos sem estabelecer causalidade com o material original.
+- O launcher PowerShell da CLI estava bloqueado por politica de scripts; usado `vercel.cmd`. A rede restrita retornou `EPERM/fetch failed`; a mesma consulta de leitura com acesso ampliado foi aprovada e funcionou. Nenhuma configuracao foi modificada.
+
+### Evidencias dos Runtime Logs
+
+Todos os horarios abaixo sao de 07/09/2026 em America/Sao_Paulo (UTC-3), timestamps dos registros, nao duracoes. Endpoint `POST /api/ai/generate`, ambiente Production, deployment `dpl_CTQvK1GzKZwHWv7MvDRkvagswm8A`.
+
+| Horario local | HTTP publico | Diagnostico tecnico |
+| --- | --- | --- |
+| 11:19:15.230 | 503 | `ApiError`, upstream status 503, code 503 |
+| 11:20:11.007 | 500 | `ApiError`, upstream status 504, code 504 |
+| 11:21:32.607 | 503 | `ApiError`, upstream status 503, code 503 |
+| 11:23:49.363 | 200 | Sucesso; contagens nao registradas |
+| 11:28:05.900 | 200 | Sucesso apos registro de retry 2/2, backoff 1.307 ms; causa da primeira tentativa nao registrada |
+| 11:29:58.751 | 200 | Sucesso; contagens nao registradas |
+| 11:31:32.790 | 400 | Rejeicao sem diagnostico de IA; codigo de validacao e contagens nao registrados |
+| 11:31:54.463 | 500 | `ApiError`, upstream status 504, code 504 |
+
+- Na segunda consulta apareceu tambem registro de 11:40:17.786 com status 0, sem diagnostico; nao foi interpretado como sucesso ou falha concluida. Nao foi iniciado por este diagnostico.
+- O SDK instalado 2.19.0 cria `ApiError.status` a partir do status HTTP de resposta nao OK em `throwErrorIfNotOK`. Assim, os 503/504 acima sao evidencia de erro upstream, nao de `JSON.parse` das atividades ou de um `.map` local.
+- A consulta tambem encontrou `ApiError` 503/504 em `/api/ai/structure`. Isso mostra falhas upstream fora da geracao combinada, mas nao prova uma unica causa interna para todos os eventos.
+- Nao ha contagens, tamanho de entrada/saida, tokens, finish reason, etapa detalhada ou duracao nos campos devolvidos por esta consulta. Nao associar cada 200 a uma modalidade especifica sem correlacao adicional. A sequencia e compativel com o relato manual, mas nao identifica inequivocamente cada tentativa do usuario.
+
+### Resultados e grau de confianca
+
+| Hipotese | Conclusao / confianca |
+| --- | --- |
+| Gemini retorna erro upstream | Confirmado para as quatro falhas de geracao concluidas acima: 503 e 504 na chamada ao provedor |
+| Tamanho/complexidade do prompt | Causa nao comprovada. O schema e system instruction sao os mesmos nas modalidades isoladas; a combinacao muda principalmente o volume/composicao de saida. Nao temos o tamanho real do conteudo selecionado |
+| Parsing da resposta Gemini | Sem evidencia nas falhas registradas, que sao `ApiError`; falhas sinteticas de parsing produzem outra classe (`SyntaxError`) |
+| Schema rejeitado por coexistencia | Sem evidencia. O mesmo schema e enviado mesmo com modalidades zeradas; nao ha validador local capaz de rejeitar especificamente a coexistencia |
+| Consolidacao backend | Nenhuma incompatibilidade deterministica encontrada; fixture 5/3/2 passou. Tipos malformados sao risco real de normalizacao, mas nao explicam os `ApiError` observados |
+| Tratamento especial de modalidade combinada | Nao existe ramificacao por combinacao; diferencas por tipo ocorrem nos campos/schema/normalizadores usuais |
+| Timeout | Confirmado status upstream 504, indicativo de timeout na cadeia do provedor. Nao comprovado o mecanismo interno/deadline nem timeout local ou da Function Vercel |
+| Quota/rate limit | Sem 429 nas falhas de geracao listadas; nao ha evidencia de quota como causa desses eventos |
+| Tokens/saida truncada | Nao comprovado: sem maxOutputTokens explicito, contagem de tokens, finishReason ou tamanho da resposta nos logs; nenhum limite externo numerico foi presumido |
+| Isoladas funcionam e combinada falha | Correlacao relatada e consistente com a sequencia dos logs; causalidade nao comprovada. Maior trabalho/saida e instabilidade transitoria do provedor sao hipoteses, nao conclusoes |
+
+- Conclusao confirmada: o local imediato das falhas registradas e `await ai.models.generateContent`, dentro do retry, antes do parsing das atividades. O erro final e convertido no catch da rota; upstream 503 explica a primeira mensagem e upstream 504 convertido em 500 explica a mensagem generica nos registros encontrados.
+- Nao ha base para afirmar bug de combinacao, estouro de tokens ou necessidade de trocar arquitetura. O sucesso combinado historico registrado neste repositorio e o sucesso sintetico atual tambem desaconselham tratar coexistencia como impossibilidade geral; o teste historico nao substitui reproducao nas condicoes atuais.
+- `maxDuration` do repositorio e 120 s. O orcamento nominal com defaults e ate aproximadamente 91,4 s para duas tentativas e backoff, sem overhead; timeout local interrompe sem retry. Valores efetivos de ambiente nao foram consultados nem alterados, portanto esse calculo nao mede a invocacao Production.
+
+### Problemas encontrados e pendencias
+
+- O mapeamento mascara upstream 504 como erro generico 500. Os logs atuais identificam a origem upstream, mas nao explicam por que o provedor ficou indisponivel ou expirou.
+- Faltam correlacao de request com contagens, duracao por tentativa, status de cada tentativa, etapa, tamanhos de entrada/saida e metadados tecnicos da resposta. Logs de retry atuais nao guardam a causa de cada tentativa.
+- Instrumentacao minima a avaliar em tarefa posterior: identificador aleatorio de correlacao; rota; contagens e numero de topicos; tamanho do conteudo em caracteres/bytes; indice da tentativa e duracao; etapa fechada (`provider_call`, `response_received`, `json_parse`, `normalize`, `http_response`); classe/codigo/status upstream permitidos; codigo/status publico; indicador de timeout local. Registrar somente numeros, booleanos e categorias de lista fechada.
+- Imediatamente apos a resposta do SDK e antes de `JSON.parse`: quantidade de candidatos, presenca/comprimento de texto, finish reason e categoria de bloqueio permitidas, contagens numericas de tokens quando presentes. No erro de parsing/normalizacao: apenas etapa e classe, sem mensagem original, stack ou fragmento de JSON. Nenhum prompt, material, titulo, resposta integral, chave ou valor de ambiente.
+- Para eventos passados, dados nunca registrados nao podem ser reconstruidos com seguranca. Uma reproducao futura pequena, correlacionada e autorizada permitiria comparar combinada e isoladas mantendo conteudo/configuracao equivalentes.
+
+### Estrategias possiveis, sem implementacao ou escolha
+
+| Estrategia a avaliar | Vantagem | Risco / impacto |
+| --- | --- | --- |
+| Manter uma unica chamada combinada | Menor numero de requests e menor repeticao do contexto; preserva contrato atual | Falha descarta toda a geracao; exige medir duracao/saida e avaliar tratamento de 504/validacao |
+| Chamadas independentes por modalidade | Isola falha por tipo e reduz saida por request | Repete contexto, aumenta requests/custo potencial e exige consolidacao e tratamento de sucesso parcial; nao garante resolver 503 |
+| Pequenos lotes | Limita quantidade de saida e trabalho por chamada | Mais requests, duplicacao de contexto e risco de repeticao de atividades entre lotes |
+| Lotes sequenciais | Reduz concorrencia e facilita controle de carga | Aumenta latencia total; se todos ficarem na mesma Function, podem ultrapassar o orcamento da invocacao |
+| Retry somente do lote que falhou | Preserva trabalho concluido e evita regenerar tudo | Exige identificar lotes, evitar duplicacao e definir estado parcial; limita retries para nao amplificar indisponibilidade |
+| Persistir posteriormente estado para retomada | Permite recuperar apos fechar/recarregar ou interromper sessao | Adiciona modelo de dados, privacidade, consistencia e escopo de infraestrutura; nao corrige a causa upstream por si so |
+
+### Estado atual
+
+- Diagnostico concluido; origem imediata upstream confirmada, causa da correlacao com modalidades combinadas ainda nao comprovada.
+- Nenhuma correcao ou instrumentacao implementada. Build gerou apenas artefatos ignorados; somente o relatorio teve alteracao documental persistente no conjunto versionado.
+
+### Proximos passos recomendados
+
+- Revisar este diagnostico e, em tarefa posterior explicitamente autorizada, decidir sobre observabilidade minima e reproducao correlacionada antes de escolher qualquer estrategia de correcao.
+- Encerrar esta tarefa sem avancar para implementacao, commit, push ou deploy.
+
+## Observabilidade minima e sanitizada das chamadas Gemini (07/09/2026)
+
+### Resumo
+
+- Implementada somente telemetria para `structure` e `generate`, com identificador aleatorio por operacao, correlacao entre tentativas, duracao monotônica, tamanho da entrada, contagens e metadados tecnicos permitidos.
+- Preservados prompts, schemas, modelo, temperaturas, retries, backoff, timeout, normalizacao, contratos HTTP, mensagens e frontend. O upstream 504 continua convertido em HTTP publico 500, conforme comportamento anterior.
+- Nenhuma chamada real ao Gemini, alteracao de ambiente, commit, push ou deploy nesta tarefa.
+- Lidos `GUIA_CODEX.md` e o relatorio mais recente; seguido o pedido atual anexado, que prevalece sobre a tarefa antiga ainda descrita em `TAREFA_ATUAL.md`.
+
+### Arquivos alterados
+
+- `server/ai-telemetry.ts`: novo modulo de telemetria compartilhada, listas fechadas, projecao de campos seguros, UUID nativo e medicao com `performance.now()`.
+- `server/ai.ts`: instrumentacao das tentativas existentes e das etapas de resposta/parsing/normalizacao nas duas operacoes; diagnosticos antigos agora restritos a campos permitidos, inclusive em desenvolvimento.
+- `server/app.ts`: uso do fallback sanitizado para falhas anteriores a chamada externa, evitando duplicar o erro ja registrado pela tentativa.
+- `tests/ai-telemetry.test.cjs`: testes sinteticos com TypeScript ja instalado, SDK substituido e ambiente isolado; inclui testes HTTP locais das rotas Express.
+- `RELATORIO_CODEX.md`: somente acrescimo desta entrada. As 1.767 linhas anteriores, incluindo os registros locais ainda nao commitados, foram preservadas. O prefixo original de 134.205 bytes foi verificado por SHA-256.
+
+### Alteracoes realizadas
+
+- `executeWithRetry` recebe contexto opcional de telemetria e registra cada tentativa sem alterar a decisao de retry, numero de tentativas, atraso ou cancelamento. O mesmo `requestId` acompanha toda a operacao; operacoes simultaneas recebem IDs distintos.
+- Eventos JSON com prefixo fixo `[AI Telemetry]`: `attempt_started`, `response_received`, `attempt_completed` e `attempt_failed`.
+- Etapas fechadas: `initialization`, `provider_call`, `response_received`, `json_parse`, `normalize` e `completed`. A falha mantem a etapa em que ocorreu, em vez de substitui-la por uma etapa generica `failed`.
+- Sucesso normal emite tres eventos por tentativa: inicio, resposta recebida e conclusao. Falha upstream emite inicio e falha. O evento de falha informa se havera retry e o backoff, substituindo o aviso antigo nessa operacao e evitando um evento de retry redundante.
+- A leitura de `response.text` continua ocorrendo uma unica vez; o texto local alimenta o mesmo `JSON.parse` anterior. A telemetria recebe somente seu comprimento para registro e projeta explicitamente os metadados do SDK.
+- Uma tentativa encerrada por timeout ignora eventos de resposta tardia, sem alterar o comportamento de cancelamento ou da promessa subjacente.
+- Falha do logger e ignorada para preservar resultado e retry. Acessos aos metadados tecnicos sao defensivos; getters defeituosos de metadados nao interrompem o processamento.
+- Falhas anteriores ao inicio de tentativa externa recebem fallback correlacionado com etapa `initialization`, tentativa zero e tamanhos zero (nada enviado ao provedor). Erros ja observados sao identificados por `WeakSet`, sem anexar dados ao objeto Error nem manter retencao forte dele.
+- Validacoes de entrada e o retorno antecipado de todas as quantidades zero permanecem fora da telemetria de chamadas externas: nesses caminhos nao ha chamada Gemini.
+
+### Campos registrados e significado
+
+| Campo | Origem / significado |
+| --- | --- |
+| `event`, `operation`, `stage` | Literais internos fechados; operacao `structure` ou `generate` |
+| `requestId` | UUID v4 aleatorio criado por `node:crypto`, sem material, identidade do usuario ou valor de ambiente |
+| `timestampMs` | Horario do evento em milissegundos Unix; permite conversao para UTC ou horario local |
+| `attempt` | Indice iniciado em 1; zero reservado a falha anterior a tentativa externa |
+| `durationMs` | Tempo decorrido desde o inicio da tentativa, medido com relogio monotônico e arredondado em ms; exclui o backoff entre tentativas |
+| `inputChars`, `inputBytes` | Comprimento da string efetivamente passada como `contents`, em unidades de string JavaScript e bytes UTF-8. Inclui template/titulo inseridos nessa string, mas somente as medidas sao logadas; exclui system instruction, schema e envelope HTTP |
+| `topicCount` | Quantidade de topicos selecionados em generate; omitido em structure, que ainda vai identificar topicos |
+| `flashcardsRequested`, `multipleChoiceRequested`, `trueFalseRequested`, `totalActivitiesRequested` | Contagens numericas de generate; omitidas em structure |
+| `success` | Resultado do evento de resposta ou encerramento; omitido no inicio, quando ainda nao e conhecido |
+| `upstreamStatus`, `upstreamCode` | Status HTTP estruturado validado entre 100 e 599; codigo numerico HTTP ou nome em lista fechada. Na ausencia de code, o status upstream disponivel tambem representa o codigo tecnico |
+| `publicStatus` | Status do mapeamento publico atual na falha final; 200 na conclusao. Omitido em tentativa que sera repetida, pois ainda nao ha resposta final |
+| `timeoutLocal`, `errorCategory`, `errorName` | Booleano e categorias permitidas; nenhuma mensagem ou nome arbitrario de Error |
+| `retryScheduled`, `retryDelayMs` | Decisao ja tomada pela politica existente e atraso arredondado; presentes no evento de falha conforme aplicavel |
+| `candidateCount`, `responseTextLength` | Numero de candidatos e comprimento do texto, somente quando disponiveis |
+| `finishReason`, `blockReason` | Enum permitido do primeiro candidato / bloqueio estruturado; valor desconhecido vira `UNKNOWN` |
+| `promptTokenCount`, `candidatesTokenCount`, `totalTokenCount` | Somente inteiros seguros nao negativos fornecidos por usageMetadata; ausentes/invalidos sao omitidos |
+
+- Em structure, `inputChars/inputBytes` medem o `contents` apos a amostragem ja existente de 50.000 caracteres, incluindo o marcador textual de truncamento e o template. Nao representam o documento completo recebido pela rota.
+- Um `response_received` com `success=true` significa que o SDK retornou resposta; parsing ou normalizacao ainda podem falhar. O desfecho da tentativa e `attempt_completed` ou `attempt_failed`.
+- Status de sucesso upstream so e registrado se fornecido em `sdkHttpResponse.status`; nao e inventado quando esse campo estiver ausente. `publicStatus=200` identifica o caminho de retorno bem-sucedido da operacao para a rota atual, nao uma medicao do transporte ate o navegador.
+
+### Categorias de erro e compatibilidade
+
+- Lista fechada: `NONE`, `RATE_LIMIT`, `UNAVAILABLE`, `UPSTREAM_TIMEOUT`, `LOCAL_TIMEOUT`, `AUTH_CONFIGURATION`, `NETWORK`, `PARSE`, `NORMALIZATION`, `INVALID_RESPONSE` e `UNKNOWN`.
+- 429 / `RESOURCE_EXHAUSTED`: `RATE_LIMIT`; 503 / `UNAVAILABLE`: `UNAVAILABLE`; 504 / `DEADLINE_EXCEEDED`: `UPSTREAM_TIMEOUT`; codigo/nome do timeout local: `LOCAL_TIMEOUT`; autenticacao/permissao estruturada: `AUTH_CONFIGURATION`.
+- Rede usa somente codigos tecnicos permitidos do erro ou de sua causa. Parsing e normalizacao usam a etapa observada; falha ao acessar texto apos retorno do SDK usa `INVALID_RESPONSE`.
+- A classificacao da telemetria nao examina mensagens livres. Erro conhecido apenas pelo texto pode receber `UNKNOWN`, mesmo se o mapeamento HTTP ou retry existente o reconhecer pela mensagem. Essa diferenca e intencional e nao muda a resposta publica.
+- O mapeamento HTTP e os predicados originais de retry/timeout mantem suas leituras internas anteriores de mensagem para preservar compatibilidade; essas mensagens nao sao encaminhadas ao logger.
+
+### Validacao explicita de privacidade
+
+- Resultado negativo para conteudo sensivel nos logs de IA instrumentados: nenhum material, titulo, resumo, nome/texto de topico, prompt, pergunta, resposta, `response.text`, mensagem bruta, stack, credencial ou valor de ambiente e serializado.
+- Metadados sao projetados campo a campo; nenhum objeto desconhecido do SDK ou Error e enviado diretamente ao console/JSON. Numeros sao validados, strings externas precisam corresponder exatamente a listas fechadas e valores desconhecidos sao omitidos ou normalizados para `UNKNOWN`.
+- O campo `model` foi deliberadamente omitido: a selecao atual pode vir de um valor livre de ambiente. Nao houve alteracao do modelo nem leitura de valores reais para o relatorio.
+- Removida do diagnostico de IA a antiga mensagem redigida de desenvolvimento: redacao de chave isoladamente nao garantia ausencia de material. Nomes/codigos arbitrarios tambem deixaram de ser logados.
+- Testes inseriram marcadores sinteticos em entrada, resposta, nomes/codigos de erro, mensagens, stack, metadados e ambiente isolado; nenhum marcador apareceu nos logs. Foram incluidos enums desconhecidos, contagens invalidas e getters de metadados que lancam erro.
+- A revisao cobre o caminho de logs de IA alterado nesta tarefa. Nao constitui auditoria geral dos demais logs da aplicacao, do console interno do SDK ou da infraestrutura Vercel.
+
+### Testes executados
+
+| Teste | Resultado |
+| --- | --- |
+| `node --test tests/ai-telemetry.test.cjs` | 13 testes passaram; nenhuma chamada ao Gemini |
+| Retry sintetico 503 -> sucesso | Mesmo UUID entre tentativas 1 e 2; status, categoria, duracao e backoff registrados |
+| Upstream 504 apos tentativas previstas | `UPSTREAM_TIMEOUT`, HTTP publico 500 preservado, sem duplicacao pelo catch da rota |
+| Timeout local e resposta tardia | `LOCAL_TIMEOUT`, HTTP publico 504, uma tentativa, AbortSignal acionado e nenhum sucesso tardio nos logs |
+| Generate e structure | Tamanhos UTF-8 corretos, amostragem da estrutura preservada, contagens apenas onde fazem sentido |
+| Parsing / normalizacao / acesso ao texto | Etapas e categorias distintas; mesmos erros funcionais e sem retry adicional |
+| Privacidade e metadados ausentes/hostis | Sem conteudo sintetico sensivel; campos ausentes nao inventados; metadados defeituosos nao mudam sucesso |
+| Operacoes concorrentes / falha do logger | IDs distintos por operacao; logger com falha nao altera resultado nem retry |
+| Falha de inicializacao / zero atividades | Fallback sanitizado sem chamada externa; retorno antecipado vazio preservado |
+| HTTP local com Express e SDK sintetico | Generate 503 e structure com upstream 504 -> publico 500; corpos/mensagens originais, sem requestId no contrato |
+| Comparacao em memoria com `HEAD:server/ai.ts` anterior | Requests identicos para structure/generate nos modos fiel e complementar, incluindo prompts/schema/modelo/timeout; resultados iguais exceto IDs gerados; 12 mapeamentos publicos identicos |
+| `npm run lint` | Passou (`tsc --noEmit`) |
+| `npm run build` | Passou; frontend e backend gerados, sem dependencias novas |
+| `git diff --check` | Passou; somente avisos esperados de conversao LF/CRLF |
+
+- Os testes usam somente pacotes ja instalados e o runner nativo `node:test`. O SDK e substituido em memoria, dotenv nao e carregado e variaveis de ambiente reais nao sao consumidas nesses testes.
+- Nao foi necessario teste real minimo, consulta nova a Production ou nova bateria de geracao. A publicacao e validacao de logs no runtime Vercel continuam para uma tarefa autorizada posterior.
+
+### Resultados
+
+- Os novos logs permitem distinguir 503 upstream, 504 upstream, timeout local, retry, duracao por tentativa, tamanho de entrada e etapa de falha, correlacionados por operacao.
+- Metadados de tokens e termino/bloqueio ficam disponiveis quando o SDK os fornece, sem expor conteudo.
+- Nenhuma correcao da geracao foi implementada. As lacunas funcionais previamente diagnosticadas, inclusive aceitaçao de resposta vazia, continuam preservadas por exigencia de escopo.
+
+### Problemas encontrados e riscos
+
+- Os logs antigos de desenvolvimento podiam conter mensagem do SDK, e nomes/codigos de erro eram strings livres. Essa superficie foi removida apenas no diagnostico de IA.
+- Campos opcionais podem nao existir em uma resposta real; nesses casos permanecem ausentes. A instrumentacao nao recupera dados de falhas anteriores a sua publicacao.
+- Encerramento forcado da Function ou indisponibilidade do destino de logs pode impedir o evento final; um evento de inicio isolado nao comprova sucesso/falha. Nenhum timeout ou configuracao de runtime foi alterado.
+- Ha custo operacional de alguns eventos pequenos por tentativa; nao se registram eventos adicionais para cada transicao local de parsing/normalizacao, apenas a etapa relevante quando ocorre falha.
+
+### Estado atual
+
+- Implementacao local e testes concluidos na branch `piloto-vercel`; frontend, configuracao Vercel, dependencias e ambiente permanecem inalterados.
+- Arquivos pendentes apenas no workspace; Production ainda nao possui esta telemetria.
+- Nenhum commit criado; nenhum push ou deploy realizado.
+
+### Pendencias
+
+- Revisao e autorizacao para consolidacao/publicacao em tarefa posterior.
+- Apos publicacao autorizada, verificar eventos sanitizados no ambiente escolhido e correlacionar uma futura falha real antes de decidir qualquer correcao da geracao.
+
+### Proximos passos recomendados
+
+- Revisar o diff e autorizar separadamente commit, push/deploy e eventual reproducao minima. Nao iniciar lotes, filas, fallback, persistencia, novo retry ou mudanca de timeout nesta etapa.
+
+## Publicacao da telemetria em Preview - revisao local (07/09/2026)
+
+### Resumo
+
+- Autorizada a consolidacao da telemetria ja implementada em um unico commit e push somente para `piloto-vercel`, com validacao no Preview e sem promocao para Production.
+
+### Arquivos alterados
+
+- Conjunto revisado: `server/ai-telemetry.ts`, `server/ai.ts`, `server/app.ts`, `tests/ai-telemetry.test.cjs` e `RELATORIO_CODEX.md`.
+- Preservadas integralmente as 1.888 linhas anteriores do relatorio, incluindo os registros locais pendentes.
+
+### Alteracoes realizadas
+
+- Revisados status, diff, arquivos novos e listas de campos permitidos. Nenhuma alteracao inesperada, segredo, valor real de ambiente, material real ou arquivo indevido encontrado no conjunto a consolidar.
+- Nenhuma alteracao funcional adicional realizada. Prompts, modelo, schema, retries, timeout, frontend e contratos publicos permanecem como na implementacao revisada.
+
+### Testes executados
+
+- `node --test tests/ai-telemetry.test.cjs`: 13 testes passaram.
+- `npm run lint`, `npm run build` e `git diff --check`: passaram; somente avisos esperados de LF/CRLF.
+
+### Resultados
+
+- Conjunto aprovado pela revisao local para o commit autorizado `chore: adicionar telemetria sanitizada da IA`.
+- Production antes do push: `dpl_CTQvK1GzKZwHWv7MvDRkvagswm8A`, target `production`, `READY`.
+
+### Problemas encontrados
+
+- Nenhum bloqueio local. Nenhum segredo ou conteudo de ambiente foi impresso ou incluido.
+
+### Estado atual
+
+- Branch `piloto-vercel`, HEAD anterior `1e929c0`; `main` permanece em `3435fd5b8b256937364f80e57c4a33ce02d4f14a`.
+
+### Pendencias
+
+- Criar o commit, enviar exclusivamente `piloto-vercel`, confirmar Preview do SHA e validar paginas, health e uma chamada minima de cada operacao.
+
+### Proximos passos recomendados
+
+- Registrar o SHA e os resultados remotos em acrescimo local apos o commit, evitando um segundo commit/push apenas para publicar o resultado documental.
